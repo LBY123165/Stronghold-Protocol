@@ -1,6 +1,7 @@
 // server/match/player/basics.js — PlayerState methods: the basics — seat flags and counts (isHumanActive,
 // botControlled, deployCap, deployCount, tempEmpty), the prep that resolves a temp piece (tempDue, _putTemp: every
-// write into a temp slot), the operator loadout (DESIGN §16: setLoadout, loadoutFor; 0.2.2 潜能 / 练度: cultivationFor), the not-owned operators fielded
+// write into a temp slot), the operator loadout (DESIGN §16: setLoadout, loadoutFor; 0.2.2 潜能 / 练度: cultivationFor), the
+// 干员皮肤 selection (docs/SKINS.md: setSkins, skinOf), the not-owned operators fielded
 // as their stand-ins (0.2.0 补位: setNotOwned, fieldsStandIn, fieldRecord), the deploy map on the field the
 // player deploys on (Match.deployFieldOf) and the withdrawal of pieces a terrain / deploy-field change left on tiles
 // they may no longer occupy (_evictIllegal), dirty.
@@ -9,7 +10,7 @@
 
 import { PHASE } from '../../../shared/constants.js';
 import { msg, dn } from '../../../shared/i18n.js';
-import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, resolveLoadout } from '../../../shared/protocol.js';
+import { checkLoadout, checkLoadoutOps, cultivationCharIds, checkNotOwned, resolveLoadout, isSkinId } from '../../../shared/protocol.js';
 import { cultivationOf } from '../../../shared/potential.js';
 import { tileKey, boardOrder } from '../board.js';
 
@@ -24,6 +25,7 @@ function opsCharIds(raw) {
 
 export class PlayerBasics {
   get isHumanActive() { return !this.isBot && !this.left; }
+  get pool() { return this.m.poolFor(this); }
   /** The engine acts for this seat (AI teammate or "AI 托管"; a departed human is eliminated, so nothing is left to do). */
   get botControlled() { return this.isBot || this.left || this.autoplay; }
 
@@ -109,6 +111,52 @@ export class PlayerBasics {
       this.ops = Object.freeze(o);
     }
     return true;
+  }
+
+  /**
+   * Replace the 干员皮肤 selection (docs/SKINS.md) after re-checking it against this match's data. Accepts the checked
+   * form the lobby froze (`{ [baseChessId]: skinId }`) or raw `room.skins` entries.
+   *
+   * Unlike setLoadout this is not locked to INFO_CHECK: Match.setSkins replaces the selection at any time during a match.
+   * The key must be a base chess this player can field, or one of the two key families without a chess record of their
+   * own — a 自选 operator id (`char_*`) or a 自选 slot id (`chess_char_*_diy*`) — so a DIY pick can carry its own skin
+   * (server/lobby.js freezeSkins keeps the same keys). The skinId itself is only checked structurally (isSkinId): an
+   * unknown one never matches a model, which is harmless, and keeping it means a build that later gains the art honours
+   * the stored choice.
+   * @param {any} skins `{ [chessId]: skinId }`
+   * @returns {boolean} false when the player is a bot (its selection stays empty)
+   */
+  setSkins(skins) {
+    if (this.isBot) return false;
+    const out = {};
+    if (skins && typeof skins === 'object' && !Array.isArray(skins)) {
+      for (const [id, skinId] of Object.entries(skins)) {
+        if (!isSkinId(id) || !isSkinId(skinId)) continue;
+        // a 自选 operator / slot key: no chess record of its own, kept as sent (the client composes its record)
+        if (id.startsWith('char_') || (id.startsWith('chess_char_') && id.includes('_diy'))) { out[id] = skinId; continue; }
+        const rec = this.gd.chess(id);
+        // one entry per BASE chess (an elite `_b` inherits its base's skin) and only for a chess the data knows
+        if (!rec || rec.isGolden || rec.visible === false || (rec.baseId && rec.baseId !== id)) continue;
+        out[id] = skinId;
+      }
+    }
+    this.skins = Object.freeze(out);
+    return true;
+  }
+
+  /**
+   * The skinId one of this player's pieces wears (docs/SKINS.md), or null for its default model. The lookup order is the
+   * base chess id, the piece id, then a 自选 pick's operator id — so a DIY slot falls back from its own slot key to the
+   * operator the player put in it.
+   * @param {object|null} chessRecord the piece's chess record (its `baseId` wins when present)
+   * @param {string} pieceId the piece's chess id (a chess_char_*_a / _b key)
+   * @param {string|null} [diyCharId] the operator a 自选 slot is filled with (PlayerState.diyPickOf)
+   * @returns {string|null}
+   */
+  skinOf(chessRecord, pieceId, diyCharId = null) {
+    const s = this.skins;
+    if (!s || !pieceId) return null;
+    return s[chessRecord && chessRecord.baseId ? chessRecord.baseId : pieceId] || s[pieceId] || (diyCharId ? s[diyCharId] : null) || null;
   }
 
   /**

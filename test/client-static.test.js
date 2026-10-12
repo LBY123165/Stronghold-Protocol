@@ -435,7 +435,7 @@ describe('net.js', () => {
     assert.ok(ws().last('ping'), 'latency probe before hello');
     net.setName('  凯尔希  ');
     const hello = ws().last('hello');
-    assert.deepEqual({ ...hello, rid: 0 }, { t: 'hello', rid: 0, name: '凯尔希', version: PROTOCOL_VERSION, token: 'tok-1' });
+    assert.deepEqual({ ...hello, rid: 0 }, { t: 'hello', rid: 0, name: '凯尔希', version: PROTOCOL_VERSION, wire: 1, token: 'tok-1' });
     assert.equal(net.status, 'handshaking');
     ws().recv({ t: 'welcome', rid: hello.rid, playerId: 'p_1', token: 't', name: '凯尔希', serverNow: Date.now() });
     assert.equal(net.status, 'online');
@@ -620,6 +620,40 @@ describe('net.js', () => {
     assert.equal(errs.length, 1);
     assert.match(errs[0].message, /版本/);
     await assert.rejects(p, (e) => e.code === 'OFFLINE');
+  });
+
+  test('emergency-refused visitors wait for the server retry window with jitter; focus and repeat errors do not churn', async () => {
+    const { net, ws, sockets, timers } = await makeNet();
+    const errors = [];
+    net.on('helloError', (e) => errors.push(e.code));
+    net.setName('A'); ws().open();
+    ws().recv({ t: 'm.emergency', active: true, retryAt: timers.now() + 120000 });
+    ws().recv({ t: 'error', rid: ws().last('hello').rid, code: 'SERVER_EMERGENCY' });
+    ws().drop(1008);
+    assert.equal(net.retryAt - timers.now(), 122500);
+    net.retryNow(); net.reconnectNow(); net.connect();
+    assert.equal(sockets.length, 1, 'automatic focus / online retries cannot skip emergency backoff');
+    timers.advance(122499);
+    assert.equal(sockets.length, 1);
+    timers.advance(1); ws().open();
+    ws().recv({ t: 'm.emergency', active: true, retryAt: timers.now() + 5000 });
+    ws().recv({ t: 'error', rid: ws().last('hello').rid, code: 'SERVER_EMERGENCY' });
+    ws().drop(1008);
+    assert.equal(net.retryAt - timers.now(), 32500, 'near retry windows retain a reasonable lower limit');
+    assert.deepEqual(errors, ['SERVER_EMERGENCY'], 'the persistent notice needs no repeated error toast');
+    timers.advance(32500); ws().open();
+    ws().recv({ t: 'welcome', rid: ws().last('hello').rid, playerId: 'p_1', token: 't', name: 'A' });
+    ws().drop();
+    assert.equal(net.retryAt - timers.now(), 500, 'accepted identity returns to normal reconnect');
+    net.close();
+  });
+
+  test('existing match members keep normal reconnect during emergency without a hello rejection', async () => {
+    const { net, ws, timers } = await onlineNet();
+    ws().recv({ t: 'm.emergency', active: true, retryAt: timers.now() + 120000 });
+    ws().drop();
+    assert.equal(net.retryAt - timers.now(), 500);
+    net.close();
   });
 
   test('pushes are emitted by type and "*"; unsolicited errors as unhandledError; junk ignored', async () => {
@@ -1111,7 +1145,8 @@ describe('screen helpers', () => {
     };
     assert.equal(normalizeSeats(room).length, 4);
     assert.equal(normalizeSeats({ mode: 'solo', seats: [room.seats[0], null, null, null] }).length, 1);
-    assert.deepEqual(normalizeSeats({ mode: 'coop', seats: 'bad' }), [null, null, null, null]);
+    assert.deepEqual(normalizeSeats({ mode: 'coop', seats: 'bad' }), Array(8).fill(null), 'a legacy room without seats uses the default eight-seat capacity');
+    assert.deepEqual(normalizeSeats({ mode: 'coop', capacity: 20, seats: [] }), Array(20).fill(null));
     let f = roomFacts(room, 'h');
     assert.equal(f.isHost, true);
     assert.equal(f.canStart, false, 'guest not ready');

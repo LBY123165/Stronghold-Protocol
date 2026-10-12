@@ -19,7 +19,7 @@ import { sanitizeName, TokenBucket, SessionRegistry, clientAddress, normalizeIp,
 import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
+import { ERR, BASE_SEATS, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -68,7 +68,7 @@ function clientPool(getUrl) {
 }
 
 async function createRoom(c, mode = 'coop', difficulty = 'NORMAL') {
-  const r = await c.request({ t: 'room.create', mode, difficulty });
+  const r = await c.request({ t: 'room.create', mode, difficulty, capacity: BASE_SEATS });
   assert.equal(r.t, 'ok', JSON.stringify(r));
   return c.waitFor('room.state', (s) => s.hostId === c.id && s.mode === mode);
 }
@@ -162,7 +162,7 @@ describe('static http server', () => {
   });
 
   test('javascript: correct MIME, gzip when accepted, identity otherwise', async () => {
-    const gz = await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip, deflate, br' } });
+    const gz = await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip, deflate' } });
     assert.equal(gz.status, 200);
     assert.equal(gz.headers['content-type'], 'text/javascript; charset=utf-8');
     assert.equal(gz.headers['content-encoding'], 'gzip');
@@ -236,7 +236,7 @@ describe('static http server', () => {
     const assetRoot = await httpReq(srv.port, '/assets');
     assert.equal(assetRoot.status, 301, 'directory redirect, not cached content');
     const versioned = await httpReq(srv.port, '/js/app.js?v=123');
-    assert.match(versioned.headers['cache-control'], /immutable/);
+    assert.equal(versioned.headers['cache-control'], 'no-cache', 'an arbitrary query is not a verified runtime content version');
     const html = await httpReq(srv.port, '/index.html?v=1');
     assert.equal(html.headers['cache-control'], 'no-cache');
   });
@@ -485,7 +485,7 @@ describe('websocket lobby', () => {
     await expectError(c, { t: 'room.join', code: 'AB CD' }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.join', code: { $gt: '' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'room.ready', ready: 'yes' }, ERR.BAD_MSG);
-    await expectError(c, { t: 'room.removeBot', seat: 9 }, ERR.BAD_MSG);
+    await expectError(c, { t: 'room.removeBot', seat: MAX_SEATS }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.buy', slot: -1 }, ERR.BAD_MSG);
     await expectError(c, { t: 'g.move', uid: 1, to: { area: 'moon' } }, ERR.BAD_MSG);
     await expectError(c, { t: 'ping', c: 'x' }, ERR.BAD_MSG);
@@ -542,7 +542,7 @@ describe('websocket lobby', () => {
     assert.equal(st.mode, 'coop');
     assert.equal(st.difficulty, 'HARD');
     assert.equal(st.inMatch, false);
-    assert.equal(st.seats.length, MAX_SEATS);
+    assert.equal(st.seats.length, BASE_SEATS);
     assert.deepEqual(st.seats[0], { seat: 0, playerId: host.id, name: 'Host', isBot: false, ready: false, connected: true });
     assert.deepEqual(st.seats.slice(1), [null, null, null]);
 
@@ -740,13 +740,13 @@ describe('websocket lobby', () => {
     await expectOk(host, { t: 'room.leave' });
     const migrated = await a.waitFor('room.state', (s) => s.hostId !== host.id);
     assert.equal(migrated.hostId, a.id, 'lowest remaining seat becomes host');
-    assert.equal(migrated.seats[0], null);
+    assert.equal(migrated.seats[0]?.playerId, a.id, 'the waiting-room host moves to P1');
     await b.waitFor('room.state', (s) => s.hostId === a.id);
 
-    // new joiner takes the lowest free seat (0); host stays with A
+    // new joiner takes the lowest free seat (1); host stays with A at P1
     const c = await pool.player('C');
     const joined = await joinRoom(c, st.code);
-    assert.equal(seatOf(joined, c.id).seat, 0);
+    assert.equal(seatOf(joined, c.id).seat, 1);
     assert.equal(joined.hostId, a.id);
     await expectOk(a, { t: 'room.addBot' });
     const withBot = await c.waitFor('room.state', (s) => s.seats[3]?.isBot);
@@ -1193,7 +1193,7 @@ describe('lobby timers and match interface', () => {
     await joinRoom(guest, st.code);
     await host.terminate();
     const migrated = await guest.waitFor('room.state', (s) => s.hostId === guest.id, GRACE + 1000);
-    assert.equal(migrated.seats[0], null);
+    assert.equal(migrated.seats[0]?.playerId, guest.id);
     await expectOk(guest, { t: 'room.addBot' });
   });
 

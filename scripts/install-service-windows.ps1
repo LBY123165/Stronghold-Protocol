@@ -16,6 +16,11 @@ param(
   [string]$BindHost = '::',
   [ValidateSet('client', 'server')][string]$Combat = 'client',
   [ValidateSet('off', 'sample', 'all')][string]$Verify = 'off',
+  # 运维后台 (docs/ADMIN.md)。不传 = 首次自动生成一个 32 字节随机密钥（存在 runtime\admin.secret，
+  # 并写进 service.env.cmd 的 ADMIN_SECRET_FILE）；重新执行时沿用已有密钥，不会把人踢下线。
+  # 传 -NoAdmin 就是完全不开后台。
+  [string]$AdminSecret = '',
+  [switch]$NoAdmin,
   [string]$TaskName = 'StrongholdProtocol',
   [switch]$AllowPublicNetwork,
   [switch]$NoFirewall,
@@ -68,6 +73,17 @@ function Show-Status {
   } catch { Write-Host "端口 $p 上没有响应（刚启动时请等几秒；日志：$Log）" -ForegroundColor Yellow }
   & netsh advfirewall firewall show rule name="$RuleName" | Out-Null
   if ($LASTEXITCODE -eq 0) { Write-Host "防火墙规则「$RuleName」已存在。" } else { Write-Host "防火墙规则「$RuleName」不存在。" -ForegroundColor Yellow }
+  # 运维后台：service.env.cmd 里有没有 ADMIN_SECRET_FILE / ADMIN_SECRET
+  if (Test-Path $EnvFile) {
+    $adminLine = Select-String -Path $EnvFile -Pattern 'set "(ADMIN_SECRET_FILE|ADMIN_SECRET)=' | Select-Object -First 1
+    if ($adminLine) {
+      $secretPath = Join-Path $Root 'runtime\admin.secret'
+      Write-Host "运维后台已启用：http://127.0.0.1:$p/admin" -ForegroundColor Green
+      if (Test-Path $secretPath) { Write-Host "  密钥文件：$secretPath（内容即登录密钥，见 docs\ADMIN.md）" }
+    } else {
+      Write-Host "运维后台未启用（重装时加 -AdminSecret，或不加 -NoAdmin）。" -ForegroundColor Yellow
+    }
+  }
   if (Test-Path $Log) { Write-Host "`n日志最后 10 行（$Log）："; Get-Content $Log -Tail 10 }
 }
 
@@ -137,6 +153,32 @@ try {
     "set `"SP_VERIFY=$Verify`""
   ) | Set-Content -Path $EnvFile -Encoding Oem -ErrorAction Stop
 
+  # ---- 运维后台密钥（与 Linux 的 scripts/install-service-linux.sh 对称）--------------------------------
+  $AdminSecretFile = Join-Path $Root 'runtime\admin.secret'
+  $adminEnabled = -not $NoAdmin
+  if ($adminEnabled) {
+    $runtimeDir = Join-Path $Root 'runtime'
+    if (-not (Test-Path $runtimeDir)) { New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null }
+    if (-not $AdminSecret) {
+      # 已有密钥就沿用：重装/改端口不该让所有登录失效
+      if (Test-Path $AdminSecretFile) {
+        $AdminSecret = (Get-Content $AdminSecretFile -Raw).Trim()
+      } else {
+        $bytes = New-Object byte[] 32
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $AdminSecret = (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+      }
+    }
+    if ($AdminSecret.Length -lt 16) { throw "ADMIN_SECRET 至少需要 16 个字符（当前 $($AdminSecret.Length) 个）。" }
+    Set-Content -Path $AdminSecretFile -Value $AdminSecret -Encoding Ascii -NoNewline -ErrorAction Stop
+    # 密钥放文件里（不放 env 文件），服务端启动时自己读，与 Linux 的 ADMIN_SECRET_FILE 用法一致
+    Add-Content -Path $EnvFile -Value "set `"ADMIN_SECRET_FILE=$AdminSecretFile`"" -Encoding Oem
+    Write-Host "已配置运维后台密钥：$AdminSecretFile" -ForegroundColor Green
+  } else {
+    Remove-Item -Path (Join-Path $Root 'runtime\admin.secret') -ErrorAction SilentlyContinue
+    Write-Host '未启用运维后台（-NoAdmin）。' -ForegroundColor Yellow
+  }
+
   if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Stop-ServerProcesses
@@ -162,6 +204,12 @@ try {
   Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
   Start-Sleep -Seconds 4
   Show-Status
+  if ($adminEnabled) {
+    Write-Host "`n运维后台（浏览器打开，用下面的密钥登录）："
+    Write-Host "  http://localhost:$Port/admin"
+    Write-Host "  密钥：$AdminSecret" -ForegroundColor Cyan
+    Write-Host "  （也已存到 $AdminSecretFile；公网使用请配合 HTTPS，见 docs\ADMIN.md）"
+  }
   Write-Host "`n朋友访问地址（局域网 / IPv6，方括号不能少）："
   # doctor prints a full URL. An IPv6 literal is bracketed, so a pattern that requires a digit right after http://
   # would drop it. Keep every http:// line; the rest of the report is classification text.

@@ -42,6 +42,8 @@
 // so it can be unit tested without a browser. Helpers never throw on unknown ids — they return null and the
 // caller falls back (docs/ASSETS.md "Other fallbacks").
 
+import { runtimeURL, runtimeCacheMode } from './runtime.js';
+
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' && v ? v : null);
 const get = (o, k) => (isObj(o) && Object.hasOwn(o, k) ? o[k] : undefined);
@@ -56,8 +58,25 @@ export function baseCharId(id) {
 }
 
 /**
+ * 干员皮肤 (docs/SKINS.md): the installed skin record of an operator — `data/assets.json` →
+ * `chars[charId].skins[skinId]` = `{ name, group, avatar, spine? }` — or null when this build has no such skin (an
+ * unknown id is harmless: the caller falls back to the default model).
+ * @param {any} m the assets manifest
+ * @param {string} charId the OPERATOR id (`char_498_inside`), not the chess id
+ * @param {string|null|undefined} skinId
+ */
+export function skinRecord(m, charId, skinId) {
+  const id = str(skinId);
+  if (!id) return null;
+  const rec = get(get(m, 'chars'), str(charId) || '');
+  return get(get(rec, 'skins'), id) || null;
+}
+
+/**
  * Operator avatar. Accepts a charId (`char_002_amiya`) or an asset id with the E2 suffix (`char_002_amiya_2`).
- * `opts.e2` prefers the E2 art. Falls back to the base avatar, then null.
+ * `opts.e2` prefers the E2 art. `opts.skin` (干员皮肤, docs/SKINS.md) prefers the chosen skin's own 180×180 avatar —
+ * note the difference from the spine: EVERY installed skin has an avatar, but only some have a model.
+ * Falls back to the base avatar, then null.
  */
 export function avatarUrl(m, id, opts) {
   const s = str(id);
@@ -69,11 +88,15 @@ export function avatarUrl(m, id, opts) {
     rec = get(get(m, 'chars'), base);
     if (rec && /_2$/.test(s)) e2 = true;
   }
-  if (rec) return str(e2 && rec.avatarE2) || str(rec.avatar) || null;
+  if (rec) {
+    const skin = skinRecord(m, (direct ? s : baseCharId(s)), opts && opts.skin);
+    if (skin && str(skin.avatar)) return str(skin.avatar);
+    return str(e2 && rec.avatarE2) || str(rec.avatar) || null;
+  }
   return null;
 }
 
-/** Operator half-body portrait (`_1` base, `_2` E2). */
+/** Operator half-body portrait (`_1` base, `_2` E2). A skin brings no portrait of its own, so this ignores `opts.skin`. */
 export function portraitUrl(m, id, opts) {
   const s = str(id);
   if (!s) return null;
@@ -142,6 +165,9 @@ export function subProfIconUrl(m, sub) {
  * Spine manifest entry for a unit asset id (operator charId, token id, enemy id). `opts.back` asks for the Back
  * model (operators only; falls back to Front). Enemy aliases are resolved transparently. Returns the Spine
  * object of docs/ASSETS.md or null.
+ * `opts.skin` (干员皮肤, docs/SKINS.md) asks for an installed skin's own model: it replaces the operator's default one
+ * and the default becomes the returned entry's `fallback`, so a skin whose files fail to load (or a skin that only has
+ * an avatar) still draws the operator rather than nothing.
  * `opts.local` (the data/local-assets.json manifest): an enemy or token whose official model only the local client has
  * (`spineLocal`, e.g. 灼热源石虫 — user feedback after 0.1.0, D3 — and most 自选 summons) gets that model when the
  * manifest lists every one of its files; the returned entry's `fallback` is the web model (an enemy's alias; a token's
@@ -153,8 +179,13 @@ export function spineEntry(m, id, opts) {
   if (!s) return null;
   const ch = get(get(m, 'chars'), s) || get(get(m, 'chars'), baseCharId(s));
   if (ch && isObj(ch.spine)) {
-    const sp = (opts && opts.back && isObj(ch.spine.back)) ? ch.spine.back : ch.spine.front;
-    return validSpine(sp) ? sp : null;
+    const base = defaultSpine(ch, opts);
+    const skin = opts && str(opts.skin) ? get(get(ch, 'skins'), str(opts.skin)) : null;
+    if (skin && isObj(skin.spine)) {
+      const sp = (opts && opts.back && isObj(skin.spine.back)) ? skin.spine.back : skin.spine.front;
+      if (validSpine(sp)) return base ? { ...sp, fallback: base } : sp;
+    }
+    return base;
   }
   const tk = get(get(m, 'tokens'), s);
   if (tk) {
@@ -176,6 +207,12 @@ export function spineEntry(m, id, opts) {
 }
 
 const localSpines = new WeakMap(); // spineLocal record → { local, web, entry } (one entry object per manifest pair)
+
+/** The operator's own model for a direction: `opts.back` prefers Back, falling back to Front. Null when unusable. */
+export function defaultSpine(ch, opts) {
+  const sp = (opts && opts.back && isObj(ch.spine.back)) ? ch.spine.back : ch.spine.front;
+  return validSpine(sp) ? sp : null;
+}
 
 /**
  * A manifest `spineLocal` (`{ group, skel, atlas, textures[], pma, anims, … }`, file names in the data/local-assets.json
@@ -199,10 +236,17 @@ export function localSpineEntry(sl, local, web) {
   return entry;
 }
 
-/** Whether an operator/token/enemy has a Back model. */
-export function hasBackSpine(m, id) {
+/**
+ * Whether an operator/token/enemy has a Back model. `skinId` (干员皮肤, docs/SKINS.md) asks about an installed skin:
+ * a skin has no Back model of its own, so its Front is mirrored — but a skin WITHOUT `spine` at all keeps the
+ * operator's own Back, which is what this answers (render/units.js `_wantsBack`).
+ */
+export function hasBackSpine(m, id, skinId) {
   const ch = get(get(m, 'chars'), str(id) || '') || get(get(m, 'chars'), baseCharId(id) || '');
-  return !!(ch && isObj(ch.spine) && validSpine(ch.spine.back));
+  if (!ch) return false;
+  const skin = str(skinId) ? get(get(ch, 'skins'), str(skinId)) : null;
+  if (skin && isObj(skin.spine) && validSpine(skin.spine.back)) return true;
+  return !!(isObj(ch.spine) && validSpine(ch.spine.back));
 }
 
 export function validSpine(sp) {
@@ -210,8 +254,8 @@ export function validSpine(sp) {
 }
 
 /** Best 2D picture for a unit asset id (operator avatar, token avatar, enemy icon, item icon). */
-export function unitPictureUrl(m, id) {
-  return avatarUrl(m, id) || tokenAvatarUrl(m, id) || enemyIconUrl(m, id) || itemIconUrl(m, id) || null;
+export function unitPictureUrl(m, id, opts) {
+  return avatarUrl(m, id, opts) || tokenAvatarUrl(m, id) || enemyIconUrl(m, id) || itemIconUrl(m, id) || null;
 }
 
 // ---- audio ---------------------------------------------------------------------------------------------------
@@ -761,7 +805,8 @@ export function createAssets(options) {
 
   /** One fetch of the manifest → the JSON object, or throws (err.status / err.badJson as data.js). */
   async function fetchOnce() {
-    const res = await doFetch(url, { cache: 'no-cache' });
+    const versioned = runtimeURL(url);
+    const res = await doFetch(versioned, { cache: runtimeCacheMode(versioned) });
     if (!res || !res.ok) throw Object.assign(new Error(`HTTP ${res ? res.status : '???'}`), { status: res ? res.status : null });
     let json;
     try { json = await res.json(); } catch (err) { throw Object.assign(err instanceof Error ? err : new Error(String(err)), { badJson: true }); }
@@ -861,7 +906,8 @@ export function createAssets(options) {
     if (!localPromise) {
       localPromise = (async () => {
         try {
-          const res = await doFetch(localUrl, { cache: 'no-cache' });
+          const versioned = runtimeURL(localUrl);
+          const res = await doFetch(versioned, { cache: runtimeCacheMode(versioned) });
           if (!res || !res.ok) return localManifest;
           const json = await res.json();
           if (!localManifest && isObj(json) && isObj(json.groups)) { localManifest = json; notify('local'); }
@@ -909,9 +955,10 @@ export function createAssets(options) {
     profIcon: (p, kind) => profIconUrl(m(), p, kind),
     subProfIcon: (s) => subProfIconUrl(m(), s),
     ui: (name) => uiUrl(m(), name),
-    picture: (id) => unitPictureUrl(m(), id),
+    picture: (id, o) => unitPictureUrl(m(), id, o),
     spineEntry: (id, o) => spineEntry(m(), id, localManifest ? { ...o, local: localManifest } : o),
-    hasBack: (id) => hasBackSpine(m(), id),
+    // skinId (干员皮肤, docs/SKINS.md) asks about an installed skin — render/units.js `_wantsBack`
+    hasBack: (id, skinId) => hasBackSpine(m(), id, skinId),
     audio: {
       bgm: (kind) => bgmEntry(m(), kind),
       sfx: (group, key) => sfxUrl(m(), group, key),

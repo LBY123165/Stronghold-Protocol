@@ -12,6 +12,7 @@
 
 import { resolveUvTable } from './atlas.js';
 import { parseObj } from './obj.js';
+import { runtimeURL } from '../../runtime.js';
 
 export const THREE_URL = '/vendor/three.module.js';
 
@@ -23,7 +24,8 @@ export function loadThree(url = THREE_URL) {
     // Browsers also cache failed module imports. Two bounded retry URLs permit a transient download failure to
     // recover; clearing only our promise would keep receiving that same cached rejection without another request.
     if (threeFailures >= 3) return Promise.resolve(null);
-    const source = new URL(url, import.meta.url);
+    // Retry query strings bypass exact import-map keys; pin the page's content version first.
+    const source = new URL(runtimeURL(url), import.meta.url);
     if (threeFailures) source.searchParams.set('sp-retry', String(threeFailures));
     const pending = import(/* @vite-ignore */ source.href).then((m) => (m && m.WebGLRenderer ? m : null), () => null).then((m) => {
       if (!m && threePromise === pending) { threePromise = null; threeFailures++; }

@@ -88,14 +88,18 @@ powershell -ExecutionPolicy Bypass -File scripts\install-service-windows.ps1
 
 它会：运行一次 `tools/setup.mjs` → 把设置写入 `scripts\service.env.cmd`（node.exe 路径、端口等）→ 注册计划任务 **StrongholdProtocol**（开机 20 秒后以 SYSTEM 身份运行 `scripts\run-server.cmd`，无需登录；服务器退出后 5 秒自动重启）→ 添加防火墙规则 → 立即启动并显示状态。日志在 `logs\server.log`（超过 10 MB 自动轮换）。
 
+它还会生成一个**运维后台**密钥（存在 `runtime\admin.secret`，并在 `service.env.cmd` 里写 `ADMIN_SECRET_FILE`），装完会打印后台地址 `http://localhost:<端口>/admin` 和登录密钥；重新执行时沿用已有密钥。不想要后台就加 `-NoAdmin`，想指定密钥用 `-AdminSecret <至少16字符>`。详见 [ADMIN.md](ADMIN.md)。
+
 | 需求 | 命令（都加在 `powershell -ExecutionPolicy Bypass -File scripts\install-service-windows.ps1` 之后） |
 |---|---|
 | 换端口 / 其他设置 | `-Port 8080`、`-Verify sample`、`-Combat server`、`-BindHost 127.0.0.1`（只给反向代理用） |
+| 运维后台密钥 | 默认自动生成（见上）；`-AdminSecret <密钥>` 指定，`-NoAdmin` 关闭 |
 | 公用网络也放行 | `-AllowPublicNetwork`（一般不需要；Tailscale 网卡被识别为公用网络时可能需要） |
-| 查看状态和最近日志 | `-Status` |
+| 查看状态和最近日志 | `-Status`（也会显示后台是否启用） |
 | 重启（更新代码后） | `-Restart` |
 | 停止 | `-Stop`（下次开机仍会自动启动） |
 | 卸载 | `-Uninstall`（删除计划任务、防火墙规则和 `service.env.cmd`） |
+| 上线自检 | `powershell -ExecutionPolicy Bypass -File scripts\preflight-windows.ps1`（与 Linux 的 `scripts/preflight-linux.sh` 对称） |
 
 建议同时关闭睡眠，否则小主机会在无人操作时休眠：`powercfg /change standby-timeout-ac 0`。
 
@@ -254,8 +258,10 @@ services:
 
 ## 4. macOS / Linux 常驻
 
+> **公网 Linux 服务器请看 [DEPLOY-LINUX.md](DEPLOY-LINUX.md)**（systemd 加固单元、nginx/Caddy 反代与 WebSocket、防火墙、升级回滚、排错表、`scripts/preflight-linux.sh` 上线自检）。下面只是最小可用的例子。三条路线的最短路径见 [DEPLOY-QUICKSTART.md](DEPLOY-QUICKSTART.md)。
+
 - 临时开服：`scripts/start.sh`（或 `npm start`），保持终端窗口打开。macOS 首次会询问是否允许 node 接受传入连接，选「允许」。
-- Linux systemd（`/etc/systemd/system/stronghold.service`，路径与用户按实际修改）：
+- Linux systemd：仓库里已有一份可直接用的加固单元 `deploy/stronghold.service`，配 `scripts/install-service-linux.sh` 一键装（建用户、生成后台密钥、写环境文件、启用服务）。手写的话最小版本如下（`/etc/systemd/system/stronghold.service`，路径与用户按实际修改）：
 
   ```ini
   [Unit]
@@ -267,6 +273,7 @@ services:
   WorkingDirectory=/opt/Stronghold-Protocol
   ExecStart=/usr/bin/node server/index.js
   Environment=PORT=3000 HOST=::
+  EnvironmentFile=-/etc/stronghold/stronghold.env
   Restart=always
   RestartSec=5
   User=stronghold
@@ -276,6 +283,7 @@ services:
   ```
 
   `sudo systemctl daemon-reload && sudo systemctl enable --now stronghold`；日志 `journalctl -u stronghold -f`；防火墙 `sudo ufw allow 3000/tcp`。
+- 想在浏览器里看在线人数、房间、实时日志，或做全服广播/维护模式：配 `ADMIN_SECRET` 后用 `/admin`，见 [ADMIN.md](ADMIN.md)。
 
 ## 5. 排错
 
@@ -307,6 +315,8 @@ services:
 表情（6 套 × 6 个）和「玩法说明」的 19 页教程图公开镜像也有：`node tools/setup.mjs` 会和其他素材一起下载（约 21 MB），不需要客户端；有本地素材时优先显示本地的。
 
 **没有客户端的服务器**想要上表中的官方素材：从**同一版本**的完整包（[Releases](https://github.com/sganggs/Stronghold-Protocol/releases)）里，把 `public/assets/local/` 文件夹和 `data/local-assets.json` 复制到服务器项目目录下的相同位置。服务器每次请求都会重新读取这两处，不必重启，玩家刷新页面即可。一定要用与服务器代码相同版本的完整包：各版本提取的内容和清单可能不同（例如灼热 / 炽焰源石虫的模型是 0.1.0 之后才加入的，召唤物模型是 0.2.0 加入的），混用其他版本的文件会缺图或用错图。复制后 `node tools/doctor.mjs` 会显示本地素材的条目数和「3D 棋盘可用」。
+
+**本多人分支的预缓存例外**：启用 [素材预缓存](ASSET_CACHE.md) 后，素材清单在服务器进程内固定；补充或替换素材及对应清单后需重启服务，使客户端的缺项检查和增量补齐读取新版本。普通静态加载仍可即时读取文件，但不代表预缓存清单已经更新。请在没有进行中对局时重启。
 
 **0.2.0 之前提取过的**：召唤物模型是 0.2.0 新增的提取项，旧的提取结果里没有（`node tools/setup.mjs` 会提示「缺少新版的自选召唤物模型」）。有客户端的电脑运行 `node tools/setup.mjs --local` 重新提取即可，只想补这一项也可以在提取用的 Python 环境里运行 `tools/local-extract/extract.py --only spine/token`（新文件写入 `public/assets/local/spine/token/`，清单里其他条目保持不变）。
 

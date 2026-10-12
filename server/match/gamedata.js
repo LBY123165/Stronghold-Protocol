@@ -14,6 +14,7 @@
 import { getConfig, getMode } from '../data.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
+import { MAX_SEATS } from '../../shared/constants.js';
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -61,9 +62,9 @@ export const COMBAT_TIME_SCALE = 2;
  *   solo   `solo` (1: the table value — one player's share);
  *   co-op  `perPlayer` true (the owner's decision of 2026-10-06, adopting PR #209 by @qingjingshenghuo): `coop` (1) × the
  *          players alive when the fight starts — bots and AI 托管 seats count, eliminated and departed seats do not —
- *          at most `aliveFull` (4); a count left out means a full team;
+ *          including larger rooms up to MAX_SEATS (20); a count left out means `aliveFull` (4);
  *          `perPlayer` false: the fixed pool of 0.1.x (「保持固定血量」, restorable with `solo` 0.25): `coop` whatever the
- *          count, × min(alive, aliveFull) / aliveFull with `aliveScaling`.
+ *          count, × alive / aliveFull with `aliveScaling`.
  * @param {object|null|undefined} modeScale config.modes[modeId].bossHpScale
  * @param {object|null|undefined} cfgScale config.bossHpScale
  * @param {boolean} isSolo
@@ -78,7 +79,7 @@ export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount) {
   if (isSolo) return pick('solo', 1);
   const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
   const n = Number(aliveCount);
-  const alive = Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
+  const alive = Number.isFinite(n) && n >= 1 ? Math.min(MAX_SEATS, Math.floor(n)) : Math.min(MAX_SEATS, full);
   if (flag('perPlayer', true)) return pick('coop', 1) * alive;
   return pick('coop', 1) * (flag('aliveScaling', false) ? alive / full : 1);
 }
@@ -310,6 +311,21 @@ export class GameData {
     if (!rec || !isShopItem(rec)) return null;
     const count = this.economy.itemPoolCopiesOverrides?.[base] ?? this.economy.itemPoolCopies?.[rec.tier];
     return Number.isInteger(count) && count >= 0 ? count : null;
+  }
+
+  /** Whether this is one of the fixed equipment items granted by SERVER_GAIN_EQUIP traits. */
+  isTraitFixedItem(id) {
+    if (!this._traitFixed) {
+      this._traitFixed = new Set();
+      for (const g of Object.values(this.raw.garrisons || {})) {
+        if (g?.effectKey !== 'SERVER_GAIN_EQUIP' || !this.item(g.bbStr?.chess)) continue;
+        const itemId = g.bbStr.chess;
+        const rec = this.item(itemId);
+        this._traitFixed.add(itemId);
+        if (rec.goldenId) this._traitFixed.add(rec.goldenId);
+      }
+    }
+    return this._traitFixed.has(id) || this._traitFixed.has(this.baseIdOf(id));
   }
 
   /** Copies needed to merge (0 = never merges: golden chess). */

@@ -111,6 +111,9 @@ export class PlayerViews {
       // switched off)
       diy: this.diy,
       diyBanned: this.diyBanned,
+      // 干员皮肤 (docs/SKINS.md): this player's own selection ({ [baseChessId]: skinId }; {} = every chess on its default
+      // model) — the own prep board draws it directly, and the same map rides in m.public players[] for the teammates
+      skins: this.skins,
       // 最终攻势 / 隐秘核心 prep (community report of 2026-10-06, item 51): `{ playerId, side, units }` — the pair partner's
       // board pieces as UnitInfo on its half of the boss field (mirrored on the right half, as the battle places them);
       // the own prep view draws them beside the own half, read-only. Absent otherwise.

@@ -1,0 +1,67 @@
+# /etc/systemd/system/stronghold.service — 卫戍协议：盟约 · 游戏服务器 (docs/DEPLOY-LINUX.md)
+#
+# 安装：sudo cp deploy/stronghold.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# 自启：sudo systemctl enable --now stronghold
+# 日志：journalctl -u stronghold -f
+#
+# 注意：本文件里的路径、用户名、Node 路径都必须按你的机器改。用 scripts/install-service-linux.sh 可以自动填。
+[Unit]
+Description=Stronghold Protocol game server (卫戍协议：盟约)
+Documentation=file:///opt/stronghold/docs/DEPLOY-LINUX.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stronghold
+Group=stronghold
+WorkingDirectory=/opt/stronghold
+
+# 环境变量（端口、HOST、ADMIN_SECRET_FILE、SP_COMBAT…）。前缀 `-` = 文件不存在也不报错。
+# 该文件应 root:stronghold 0640，里面有 ADMIN_SECRET 之类的敏感值。
+EnvironmentFile=-/etc/stronghold/stronghold.env
+
+# Node 的绝对路径：`command -v node` 查（nvm 装的会是 /home/xxx/.nvm/...，那时需要给该用户家目录读权限）
+ExecStart=/usr/bin/node server/index.js
+
+Restart=always
+RestartSec=3
+# 结掉时给对局一点收尾时间（服务端会向客户端发 room.closed 再退出）
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# 大量 WebSocket + 素材文件句柄
+LimitNOFILE=8192
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stronghold
+
+# ---- 加固（对本项目安全；逐条都验证过不会影响运行）------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# 只读整个文件系统，下面两个目录留出写权限：
+#   runtime/  服务器公告、server-settings.json（可用 SP_SERVER_SETTINGS_DIR / 启动参数改到别处）
+#   .cache/   素材下载缓存与账本（只有 tools/fetch-assets.mjs 在安装素材时会写）
+ProtectSystem=strict
+ReadWritePaths=/opt/stronghold/runtime /opt/stronghold/.cache
+
+# 不要打开 MemoryDenyWriteExecute：V8 的 JIT 需要可写可执行内存，开了 Node 起不来。
+# 不要打开 SystemCallFilter=@system-service 的全量白名单：本项目没有做系统调用审计。
+
+# 想直接监听 80/443（不推荐，建议前面放 nginx/Caddy 终止 TLS）时取消注释：
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+#CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

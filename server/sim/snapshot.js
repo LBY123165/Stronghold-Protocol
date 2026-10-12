@@ -36,6 +36,8 @@ export function unitInfo(u) {
     golden: !!d.golden,
     spine: d.spine ?? d.charId ?? u.defId,
     avatar: d.avatar ?? d.charId ?? u.defId,
+    // 干员皮肤 (docs/SKINS.md): the model the piece wears — an enemy / token / device never carries one
+    skin: u.skin ?? undefined,
     x: r2(u.x),
     y: r2(u.y),
     facing: u.facing ?? 1,

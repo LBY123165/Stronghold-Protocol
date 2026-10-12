@@ -105,6 +105,10 @@ export class PlayerRound {
       if (piece.kind === 'chess') {
         const u = { uid: piece.uid, kind: 'chess', chessId: piece.id, row: r, col: c, dir: pieceDir(piece), items: (piece.items || []).map((i) => i.id) };
         const pick = this.diyPickOf(piece.id);
+        // 干员皮肤 (docs/SKINS.md): the cosmetic model this piece wears in battle (absent = the default model); the sim
+        // only carries it through to the battle UnitInfo (server/sim/units.js skin, snapshot.js)
+        const skin = this.skinOf(this.gd.chess(piece.id), piece.id, pick ? pick.charId : null);
+        if (skin) u.skin = skin;
         if (pick) {
           // 0.2.0 自选编队: a slotted DIY slot fights as its pick (sim getChess(id, { diy }): the operator's body, the pick's
           // skill and module — no loadout fields, docs/SIM.md §12)

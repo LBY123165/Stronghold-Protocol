@@ -300,6 +300,7 @@ export async function createFieldView(host, options = {}) {
   let ownPen = null;          // the own m.private.nextEnemies (fallback composition of a scouted teammate's pen)
   let standInList = [];       // the own m.private.standIns (0.2.0 补位): pieces of these chess draw the stand-in
   let diyPicks = {};          // the own m.private.diy (0.2.0 自选编队): pieces of these DIY slots draw the operator
+  let skinMap = {};           // the own m.private.skins (干员皮肤, docs/SKINS.md): { [baseChessId]: skinId }
   let camBeforePen = null;    // { kind, opts } the camera the pen returns to
   let leader = null;          // { key, view, stand, area } the round leader standing on the boss field in the prep (setLeader)
   let leaderHidden = true;    // shown only by the boss-field prep camera (leaderShown)
@@ -677,13 +678,27 @@ export async function createFieldView(host, options = {}) {
     const pick = chess && chess.isDiy ? diyPicks[chess.baseId || chess.chessId] : null;
     const dr = pick ? data.diy(piece.id, pick) : null;
     const rec = si || dr || chess;
+    // 干员皮肤 (docs/SKINS.md): the model this piece wears — the selection the server echoed back in m.private.skins
+    const skin = ownSkin(chess, piece.id, pick);
     return {
       kind: 'op', side: 'ally', defId: piece.id,
       spine: rec?.assets?.spine || rec?.charId || null, avatar: rec?.assets?.avatar || rec?.charId || null,
+      ...(skin ? { skin } : null),
       tier: chess?.tier || piece.tier || 1, golden: !!(piece.golden || chess?.isGolden), dir,
       ...(si ? { standInFor: si.standInFor } : null),
       ...(dr ? { diy: { charId: pick.charId, skillIndex: pick.skillIndex ?? null, uniEquipId: pick.uniEquipId ?? null } } : null),
     };
+  }
+
+  /**
+   * 干员皮肤 (docs/SKINS.md): the skinId one of the OWN pieces wears — from `m.private.skins`, the server's copy of this
+   * browser's selection (`{ [baseChessId]: skinId }`, ui/skins.js sends it with room.skins). Looked up by the base chess
+   * id first, then the piece id (an elite `_b` key), then a 自选 pick's operator id — the same order as the server's
+   * PlayerState.skinOf, so the own board and a teammate's view of it agree.
+   */
+  function ownSkin(chess, pieceId, pick) {
+    const base = (chess && (chess.baseId || chess.chessId)) || pieceId;
+    return skinMap[base] || skinMap[pieceId] || (pick ? skinMap[pick.charId] : null) || null;
   }
 
   /** Board-space direction → the direction drawn (mirrored on the right half of the Final Assault prep). */
@@ -732,6 +747,7 @@ export async function createFieldView(host, options = {}) {
     const src = ps && typeof ps === 'object' ? ps : {};
     standInList = Array.isArray(src.standIns) ? src.standIns.filter((x) => typeof x === 'string') : [];
     diyPicks = src.diy && typeof src.diy === 'object' ? src.diy : {};
+    skinMap = src.skins && typeof src.skins === 'object' ? src.skins : {};
     ownPen = Array.isArray(src.nextEnemies) ? src.nextEnemies : null;
     setPenList(ownPen);
     addList(src.hand, 'hand');

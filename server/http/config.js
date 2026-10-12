@@ -67,6 +67,7 @@ export function serveDirs(opts) {
 /** net.js Network options out of the startServer() options; `trustProxy` falls back to TRUST_PROXY. */
 export function netOptionsFrom(opts) {
   const netOptions = {};
+  if (typeof opts.compactWire === 'boolean') netOptions.compactWire = opts.compactWire;
   for (const k of NET_OPTION_KEYS) {
     if (opts[k] != null) netOptions[k] = opts[k];
   }

@@ -157,7 +157,8 @@ export class BattlePlayers {
     if (!def) { this.log(`unknown chess ${inp.chessId}${lo.diy ? ' (illegal 自选 pick)' : ''}`); return null; }
     // a DIY slot has no body of its own (甄选干员): it fights only as a 自选 piece (its `diy` pick)
     if (def.raw?.isDiy && !def.diyFor) { this.log(`自选 slot ${inp.chessId} without a pick`); return null; }
-    const u = this._makeAlly(ps, def, 'op', r, c, { uid: inp.uid, dir });
+    // 干员皮肤 (docs/SKINS.md): the cosmetic model the piece wears — a token never carries one
+    const u = this._makeAlly(ps, def, 'op', r, c, { uid: inp.uid, dir, skin: inp.skin });
     u.items = [...(inp.items ?? [])];
     u.carry = inp.carryState ?? null;
     // 练度 (自持有, 0.2.2): the owned operator's ×ATK / ×DEF / ×max HP (units.js Πmul) — never a 补位 stand-in's nor a
@@ -187,6 +188,12 @@ export class BattlePlayers {
       id: ++this._idSeq, side: 'ally', kind, def, defId: def.id, name: def.name, ownerId: ps ? ps.playerId : null,
       uid: extra.uid ?? null, ownerUnit: extra.ownerUnit ?? null, x: c, y: r, tileR: r, tileC: c,
       dir: extra.dir != null ? normDir(extra.dir) : extra.facing != null ? normDir(extra.facing) : ps ? ps.dir : 'RIGHT',
+      // 干员皮肤 (docs/SKINS.md): the model this piece wears in battle. The Unit constructor keeps it (units.js `skin`),
+      // snapshot.js publishes it in every UnitInfo and the client resolves the skin's own Spine model through it — so an
+      // operator's board unit, a teammate's view of it and a watched field all draw the owner's choice. Dropping it here
+      // (the constructor's `init.skin` was never fed) left the battle on the operator's default model while the prep
+      // screen showed the skin: player report "the skin disappears in battle".
+      skin: extra.skin ?? null,
       base: {
         maxHp: st.maxHp, atk: st.atk, def: st.def, res: st.res, aspd: st.aspd, bat: st.bat, blockCnt: st.blockCnt,
         moveSpeed: 0, spRecovery: st.spRecovery, tauntLevel: st.tauntLevel, massLevel: st.massLevel,

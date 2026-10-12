@@ -1,10 +1,25 @@
 # 卫戍协议：盟约 · Stronghold Protocol: Alliance
 
-《明日方舟》季节性自走棋塔防玩法「卫戍协议：盟约」的**非官方同人复刻**：浏览器即开即玩，单人或 1–4 人联机合作。
+《明日方舟》季节性自走棋塔防玩法「卫戍协议：盟约」的**非官方同人复刻**：浏览器即开即玩，单人或最多 20 人联机合作。
 
 ![version](https://img.shields.io/badge/version-0.2.4-2ea44f)
+![mods](https://img.shields.io/badge/%E6%89%A9%E5%B1%95-20%20%E4%BA%BA%20%7C%20%E7%9A%AE%E8%82%A4%20%7C%20%E8%BF%90%E7%BB%B4%E5%90%8E%E5%8F%B0-blueviolet)
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
+
+## 本仓库包含什么
+
+这是**上游 v0.2.4（`bc50cac`）+ 两项玩家扩展 + 一套运维工具**的个人版本，可以直接开服。
+
+| 组成 | 来源 | 说明 |
+|---|---|---|
+| 游戏本体 | 上游 [`sganggs/Stronghold-Protocol`](https://github.com/sganggs/Stronghold-Protocol) **v0.2.4** | 本仓库的基线 |
+| **20 人容量** | [LongQianChen](https://github.com/LongQianChen) 的 `feat/IncreasePlayerCapacity` 分支 | 同盟房间可选 **4 / 8 / 10 / 16 / 20 人**（默认 8）：机变按实际存活人数扩充选项、干员按座位分组共享卡池、手动真人优先轮选、大队伍两轮联防与真人投票跳过、可滚动成员栏。本仓库的基线**就是该分支**（含它在上游 v0.2.4 合并之后的继续开发），玩法边界见 [多人容量说明](docs/PLAYER_CAPACITY.md)，基线与决定见 [开发记录](docs/development/README.md) |
+| **干员皮肤** | 移植自融合版 `stronghold-v0.2.1-fusion-server-release` | 皮肤目录 **271 款**；其中 **172 款带自己的战场模型**，另外 **99 款只有头像**（棋盘与作战沿用原干员模型，选择器会给它们标「仅头像」）。见 [docs/SKINS.md](docs/SKINS.md) |
+| **运维后台 `/admin`** | 本仓库新增 | 在线连接、房间与固定卡池组、实时日志、全服广播、维护模式。**没有默认口令**：不配 `ADMIN_SECRET` 时整个后台返回 404；密钥常量时间比较、登录限流、Cookie 里放的是每进程随机串。见 [docs/ADMIN.md](docs/ADMIN.md) |
+| **Linux 部署与中文文档** | 本仓库新增 | systemd 加固单元、nginx / Caddy 反向代理、防火墙、一键安装 / 更新 / 上线自检脚本，以及部署教程与排错表。见 [部署教程](docs/DEPLOY-QUICKSTART.md)、[Linux 部署](docs/DEPLOY-LINUX.md) |
+
+相对基线的改动是 **58 个文件、+6095 行**（皮肤与后台、部署资产、文档与测试）。上游的补位、自选编队、多语言、快捷键与满潜能等规则全部保留。
 
 ## 声明
 
@@ -26,7 +41,7 @@ English summary: [below](#english).
 
 ## 目录
 
-- [声明](#声明) · [简介](#简介) · [功能一览](#功能一览)
+- [声明](#声明) · [本仓库包含什么](#本仓库包含什么) · [简介](#简介) · [功能一览](#功能一览)
 - [快速开始](#快速开始)：[整合包](#方式一整合包推荐) · [从源码运行](#方式二从源码运行) · [系统要求](#系统要求) · [端口与配置](#端口与配置) · [局域网联机](#和朋友一起玩局域网)
 - [联机方式](#联机方式) · [操作](#操作) · [文档](#文档) · [开发与测试](#开发与测试) · [项目结构](#项目结构)
 - [许可证](#许可证) · [致谢与数据来源](#致谢与数据来源) · [贡献](#贡献)
@@ -35,7 +50,7 @@ English summary: [below](#english).
 
 「卫戍协议：盟约」是自走棋 + 塔防：休整期在调度中心招募干员、摆阵、配装备，作战期干员自动部署，迎击从红门涌来的敌人，漏过去的敌人扣目标生命值。本项目在浏览器里复刻了这一玩法，规则和数值尽量对照官方数据表与 PRTS 核对。
 
-- **独立模拟**（单人）与**同盟模拟**（1–4 人**合作**，没有 PvP；空位可以加 AI 队友）。
+- **独立模拟**（单人）与**同盟模拟**（最多 20 人**合作**，没有 PvP；空位可以加 AI 队友）。
 - 服务器是一个 Node.js 程序，**战斗在各玩家的浏览器里模拟**（和官方一样），服务器只管经济与回合，一台低功耗小主机就能开服。
 - 当前版本 0.2.4：按官方补齐共享卡池与装备库存，修正突袭复活选敌、克莱门莎、浊心斯卡蒂与坚守等规则，联机首领战突袭可以跳到空半场，并修复了 0.2.3 发布后玩家和 GitHub 上反馈的问题，详见 [CHANGELOG.md](CHANGELOG.md)。仍有少数规则按推断实现，与官方不一致的地方欢迎在 Issue 里反馈。
 
@@ -43,7 +58,7 @@ English summary: [below](#english).
 
 - **完整的一局**：确认本局信息 → 策略轮选（40 名策略）→ 14 回合 → 结算称号；险境及以上满足条件时进入第 15 回合「隐秘核心」。
 - **4 种难度**：标准 / 险境 / 绝境 / 终极，独立与同盟各一套参数，均取自官方数据。
-- **休整期**：招募、刷新、冻结、升级调度中心；整备区与临时整备区；从整备区拖到棋盘部署，用**方向轮盘**选择朝向。同盟模拟的卡池共用。
+- **休整期**：招募、刷新、冻结、升级调度中心；整备区与临时整备区；从整备区拖到棋盘部署，用**方向轮盘**选择朝向。同盟模拟的卡池按座位分组共享。
 - **晋升精锐**：3 名同名干员自动合成精锐，并获得一次高一阶的免费招募。
 - **干员与调配**：112 名可招募干员（+ 精锐）及其技能、天赋和特质；开局前可以为每名干员选择携带的技能（283 个技能全部手工实现）和精锐的模组。
 - **盟约与层数**：23 个盟约（8 个势力核心盟约 + 附加盟约），层数整局保留，每个盟约最多 999 层。
@@ -117,11 +132,22 @@ npm start          # 启动服务器：http://localhost:3000
 | `SP_COMBAT` | `client` | `client`：各玩家浏览器模拟自己的战斗（服务器负载极低）；`server`：由服务器模拟并推流 |
 | `SP_VERIFY` | `off` | 服务器复算客户端上报的战斗结果：`off` / `sample`（约 1/8 抽查）/ `all`（全部复算，更耗 CPU） |
 | `TRUST_PROXY` | `auto` | 是否信任 `X-Forwarded-For` 等转发头：`auto` 只信任来自本机 / 内网的代理；`1` 总是；`0` 从不 |
+| `ADMIN_SECRET` | 空 | 运维后台 `/admin` 的密钥（≥16 字符）。留空则后台整体关闭（没有默认口令）；见 [docs/ADMIN.md](docs/ADMIN.md) |
+| `ADMIN_SECRET_FILE` | 空 | 从文件读取后台密钥（推荐：进程环境里看不到密钥） |
 | `DEBUG` | 空 | 设为任意值输出详细日志 |
 | `SP_NO_BROWSER` | 空 | 设为 `1` 时启动脚本不自动打开浏览器 |
 | `SP_BOT_EMOTES` | 空 | AI 队友的对局表情回应（战斗、整备、合成、联防、收礼时即刻的 `m.emote` 广播）；设为 `0` 时整体关闭 |
 
 设置方式：macOS / Linux `PORT=8080 npm start`；PowerShell `$env:PORT=8080; npm start`；cmd `set "PORT=8080" && npm start`。健康检查：`GET /healthz`。
+
+部署与运维：
+
+- [docs/DEPLOY-QUICKSTART.md](docs/DEPLOY-QUICKSTART.md) — 三条路线（Windows 局域网 / Linux 服务器 / Docker）的最短路径 + 开服检查清单
+- [docs/DEPLOY-LINUX.md](docs/DEPLOY-LINUX.md) — Linux 服务器部署（systemd、nginx/Caddy、防火墙、升级回滚、排错、上线自检）
+- [docs/ADMIN.md](docs/ADMIN.md) — 运维后台 `/admin`（在线连接、房间与卡池组、实时日志、全服广播、维护模式）
+- [docs/SKINS.md](docs/SKINS.md) — 干员皮肤（本版本相对上游新增）
+
+Linux 上用 git 部署的话，之后更新只需在服务器上执行 `sudo sh scripts/update-linux.sh`（快进拉取 + 重装生产依赖 + 重启 + 探活）。
 
 ### 和朋友一起玩（局域网）
 
@@ -248,7 +274,7 @@ node tools/perfbench.mjs --cpu 1,4,6 --profile             # 真实战斗的帧�
 
 ## English
 
-An **unofficial, non-commercial fan remake** of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance*, played in the browser: solo, or 1–4 player co-op (AI teammates can fill seats). Combat is simulated in each player's browser, so a low-power PC can host.
+An **unofficial, non-commercial fan remake** of Arknights' seasonal auto-chess tower-defense mode *Stronghold Protocol: Alliance*, played in the browser: solo, or up to 20-player co-op (AI teammates can fill seats). Co-op rooms offer 4 / 8 / 10 / 16 / 20 seats, defaulting to 8; see [capacity rules](docs/PLAYER_CAPACITY.md). Combat is simulated in each player's browser, so a low-power PC can host.
 
 - **Run:** download the full bundle `Stronghold-Protocol-v<version>.zip` (~505 MB, all the art inside, the Chinese and Japanese operator voices included) from [Releases](../../releases/latest) — or the lite one, `…-lite.zip` (~22 MB), which downloads the art (~550 MB) on its first start; from 0.2.1 on, `…-update.zip` holds only the files changed since the earlier 0.2.x releases: stop the server, extract it over an existing 0.2.x folder and start again (the first start deletes the files the new version dropped and verifies the install) — install Node.js 22 or 24, then double-click `scripts\start-windows.bat` (Windows) or run `./scripts/start.sh` (macOS / Linux) and open <http://localhost:3000>. From source: `npm install && npm run setup && npm start` (setup downloads ~550 MB of art from public mirrors, the emotes and the how-to-play pages included; the official 3D board, some official HUD icons, two enemy models and 39 summon models are extracted from a local Arknights client — without one the game uses the 2D board and look-alike stand-ins (the summons show their avatars), and a server can copy `public/assets/local/` and `data/local-assets.json` from the full bundle of the same version).
 - **Languages:** Chinese (the default), English, 日本語, 한국어 and 繁體中文 — switch on the title screen or in Settings. Game texts come from the official clients; the Japanese, Korean and Traditional Chinese interface strings are machine translations (corrections welcome: [docs/I18N.md](docs/I18N.md)).

@@ -1,0 +1,119 @@
+/* public/admin/admin.css — 运维后台 (docs/ADMIN.md). Self-contained: the console is an operator tool, not the game UI,
+   so it does not load the client's CSS or Preact bundle. Dark, dense, readable on a phone in an emergency. */
+:root {
+  color-scheme: dark;
+  --bg: #0d1110;
+  --bg-2: #141a18;
+  --card: #171e1c;
+  --line: #263230;
+  --line-2: #33443f;
+  --text: #dbe6e1;
+  --text-dim: #8fa39c;
+  --mint: #4ed8af;
+  --mint-dim: #2f8f74;
+  --warn: #f6a329;
+  --err: #e73118;
+  --ok: #4ed8af;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { margin: 0; font-size: 17px; letter-spacing: .06em; }
+h2 { margin: 0 0 12px; font-size: 15px; letter-spacing: .04em; color: var(--text); }
+h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--text-dim); letter-spacing: .08em; }
+p { margin: 6px 0; }
+code { font-family: var(--mono); font-size: .92em; background: #0a0e0d; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+a { color: var(--mint); }
+.dim { color: var(--text-dim); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.error { color: var(--err); margin: 8px 0 0; }
+
+/* ---- top bar ---- */
+.bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 18px; background: var(--bg-2); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 5;
+}
+.bar__brand { display: flex; align-items: center; gap: 12px; }
+.bar__logo { font-size: 22px; }
+.bar__brand p { margin: 0; font-size: 12px; color: var(--text-dim); }
+.bar__right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge {
+  font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 3px;
+  border: 1px solid var(--mint-dim); color: var(--mint); background: rgba(78, 216, 175, .08); white-space: nowrap;
+}
+.badge--dim { border-color: var(--line-2); color: var(--text-dim); background: transparent; }
+.badge--on { border-color: var(--warn); color: var(--warn); background: rgba(246, 163, 41, .12); }
+.badge--off { border-color: var(--line-2); color: var(--text-dim); }
+
+/* ---- buttons & inputs ---- */
+.btn {
+  font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--line-2); background: #1c2523; color: var(--text); touch-action: manipulation;
+}
+.btn:hover { border-color: var(--mint-dim); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn--primary { background: var(--mint-dim); border-color: var(--mint-dim); color: #04120d; font-weight: 700; }
+.btn--ghost { background: transparent; }
+.btn--warn { background: rgba(246, 163, 41, .16); border-color: var(--warn); color: var(--warn); font-weight: 700; }
+.btn--danger { background: transparent; border-color: var(--line-2); color: var(--err); padding: 2px 8px; font-size: 12px; }
+input[type="text"], input[type="password"], select {
+  font: inherit; font-size: 13px; padding: 6px 9px; border-radius: 4px;
+  border: 1px solid var(--line-2); background: #0b100f; color: var(--text);
+}
+input[type="text"] { flex: 1 1 auto; min-width: 12em; }
+input:focus, select:focus { outline: 2px solid var(--mint-dim); outline-offset: 1px; }
+
+/* ---- layout ---- */
+main { padding: 18px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+.stat { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: .02em; }
+.stat small { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+.sub { margin: 2px 0 0; font-size: 12px; color: var(--text-dim); }
+.screen { max-width: 560px; margin: 8vh auto; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 24px; }
+.screen h2 { font-size: 18px; }
+.steps { margin: 12px 0; padding-left: 20px; color: var(--text-dim); }
+.steps li { margin: 6px 0; }
+#login-form { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+#login-form input { flex: 1 1 16em; }
+
+/* ---- actions ---- */
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; }
+.action { border: 1px solid var(--line); border-radius: 5px; padding: 12px; background: #131a18; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+
+/* ---- table ---- */
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 11px; letter-spacing: .06em; color: var(--text-dim); font-weight: 700; }
+tbody tr:hover { background: #1b2321; }
+td.num, th.num { text-align: right; font-family: var(--mono); }
+.grp { font-family: var(--mono); font-size: 11px; color: var(--mint); }
+.state-live { color: var(--ok); }
+.state-idle { color: var(--text-dim); }
+.state-frozen { color: var(--warn); }
+pre.mono { margin: 4px 0 0; padding: 8px; background: #0a0e0d; border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; max-height: 200px; }
+
+/* ---- logs ---- */
+.chk { float: right; font-size: 12px; font-weight: 400; color: var(--text-dim); }
+.logs { margin: 0; padding: 10px; background: #080b0a; border: 1px solid var(--line); border-radius: 4px;
+  height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+.logs .l-info { color: var(--text-dim); }
+.logs .l-warn { color: var(--warn); }
+.logs .l-error { color: var(--err); }
+.logs .l-debug { color: #5d726b; }
+.logs .t { color: #4a5c56; }
+.foot { font-size: 12px; text-align: center; padding: 4px 0 20px; }
+
+@media (max-width: 700px) {
+  .bar { flex-direction: column; align-items: flex-start; }
+  main { padding: 12px; }
+}
