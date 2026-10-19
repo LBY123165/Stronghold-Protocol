@@ -66,7 +66,7 @@ export class MatchSetupVote {
     this.setupVote = null;
     if (this.phase === PHASE.INFO_CHECK && !this.disposed && !this.ended) {
       if (vote.remainingMs > 0) {
-        this.deadline = this.sched.gameNow() + vote.remainingMs;
+        this.deadline = this.sched.now() + vote.remainingMs;
         this._phaseTimer = this.later(vote.remainingMs, () => {
           this._phaseTimer = null;
           this.enterBandDraft();

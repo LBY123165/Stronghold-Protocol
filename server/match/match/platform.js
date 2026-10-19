@@ -275,8 +275,6 @@ export class MatchPlatform {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this._emergencyLeaves.clear();
-    this._emergencyLostAuthorities.clear();
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } }
     this._stopClientCombat();
     this._cancelRehearsal();

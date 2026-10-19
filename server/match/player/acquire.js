@@ -283,7 +283,7 @@ export class PlayerAcquire {
       this.m.toast(this, 'warn', '装备库存不足，未获得该装备');
       return null;
     }
-    let piece = this.newPiece('item', itemId, exempt ? { noPool: true } : {});
+    let piece = this.newPiece('item', itemId, unlimitedGift ? { noPool: true } : {});
     // A prep-end grant may sit beside an identical copy until the next prep; the deferred marker only postpones the
     // merge and does not change shared-stock accounting.
     if (deferMerge) piece.deferMerge = true;
