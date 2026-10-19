@@ -18,6 +18,7 @@ const nameOf = (f) => typeof f === 'string' ? f : f[0];
 // Fields introduced after v1 was published use its existing extension slot. Keep this allowlist
 // explicit: adding a business field must not silently weaken coverage or renumber the fixed catalog.
 const V1_EXTENSIONS = Object.freeze({
+  hello: ['accountToken'],
   'room.create': ['assetCache'], 'room.join': ['assetCache'],
   'lobby.quickMatch': ['assetCache'], 'room.spectate': ['assetCache'],
 });
@@ -69,6 +70,8 @@ test('wire ids cover every business message and C2S field or declared v1 extensi
 
 test('published example has stable positions; null, false, zero and absence remain distinct', () => {
   assert.deepEqual(encodeWire({ t: 'm.public', phase: 'COMBAT', round: 11 }), [1, 8, '6', 7, 11]);
+  const authenticatedHello = { t: 'hello', name: '清歌梶耳', accountToken: 'account-token' };
+  assert.deepEqual(roundTrip(authenticatedHello, 'c2s'), authenticatedHello);
   for (const bossHp of [null, { hp: 0, max: 1 }]) {
     const message = { t: 'm.public', phase: 'PREP', paused: false, players: [], fields: [], bossHp };
     assert.deepEqual(roundTrip(message), message);

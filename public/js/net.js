@@ -20,7 +20,7 @@
 // - Server clock offset (serverNow ≈ Date.now() + offset) from pong samples (lowest RTT wins),
 //   bootstrapped from `welcome.serverNow` / `m.public.serverNow`.
 //
-// Identity persistence (`identity`, see the section at the end): the name lives in localStorage;
+// Identity persistence (`identity`, see the section at the end): the name and account bearer token live in localStorage;
 // the reconnect token lives in sessionStorage (survives reloads of this tab) plus a short list of
 // recent tokens in localStorage (resume after closing/reopening the tab). `identity.init()` asks
 // the other live tabs over a BroadcastChannel which tokens they hold, so a second or duplicated tab
@@ -121,6 +121,7 @@ export class Net {
    * @param {string} [opts.url] socket URL (default: derived from location at connect time)
    * @param {any} [opts.WebSocket] WebSocket constructor (default: globalThis.WebSocket)
    * @param {() => (string|null)} [opts.getToken] reconnect-token provider for `hello`
+   * @param {() => (string|null)} [opts.getAccountToken] authenticated account token provider
    * @param {() => ({ noReplace: boolean, claimAt?: number })} [opts.getTokenClaim] local ownership for this hello
    * @param {(type?: string) => (object|null|Promise<object|null>)} [opts.getAssetCacheReadiness] local entry scan (never used for hello/resume)
    * @param {() => number} [opts.now]
@@ -131,6 +132,7 @@ export class Net {
     this.url = opts.url || null;
     this.WS = opts.WebSocket || null;
     this.getToken = typeof opts.getToken === 'function' ? opts.getToken : () => null;
+    this.getAccountToken = typeof opts.getAccountToken === 'function' ? opts.getAccountToken : () => null;
     this.getTokenClaim = typeof opts.getTokenClaim === 'function' ? opts.getTokenClaim : () => null;
     this.getAssetCacheReadiness = typeof opts.getAssetCacheReadiness === 'function' ? opts.getAssetCacheReadiness : null;
     this.now = opts.now || (() => Date.now());
@@ -387,6 +389,7 @@ export class Net {
     const rid = this._nextRid();
     const msg = { t: 'hello', rid, name: this.name, version: PROTOCOL_VERSION };
     if (!this._wireDisabled) msg.wire = WIRE_VERSION;
+    try { const accountToken = this.getAccountToken(); if (typeof accountToken === 'string' && accountToken.length <= 128) msg.accountToken = accountToken; } catch { /* no account */ }
     let token = null;
     try { token = this.getToken(); } catch { token = null; }
     if (typeof token === 'string' && token.length > 0 && token.length <= 64) {
@@ -730,6 +733,7 @@ export class Net {
 // its own token (never another tab's), so it can't steal a live session either.
 
 const K_NAME = 'sp.name';
+const K_ACCOUNT = 'sp.accountToken';
 const K_TOKEN = 'sp.token';      // sessionStorage: this tab's token
 const K_WELCOME = 'sp.tokenWelcome'; // sessionStorage: { hash, at } from the first welcome for this token
 const K_RECENT = 'sp.tokens';    // localStorage: this browser's recent tokens, most recent first
@@ -971,6 +975,8 @@ export function createIdentity(deps = {}) {
     loadName: () => (sget(local, K_NAME) || '').slice(0, 64),
     /** @param {string} name */
     saveName: (name) => sset(local, K_NAME, String(name)),
+    getAccountToken: () => sget(local, K_ACCOUNT),
+    setAccountToken: (token) => token ? sset(local, K_ACCOUNT, String(token)) : sdel(local, K_ACCOUNT),
     /** Token for `hello` (null ⇒ new session). Before init() only this tab's own token is used. */
     getToken() {
       if (current) return current;
@@ -1021,7 +1027,7 @@ export function createIdentity(deps = {}) {
 export const identity = createIdentity({ onYield: () => net.reconnectNow(net.helloName || net.name) });
 
 /** Browser connection singleton (created lazily-safe: nothing touches the network until connect()). */
-export const net = new Net({ getToken: () => identity.getToken(), getTokenClaim: () => identity.getTokenClaim(),
+export const net = new Net({ getToken: () => identity.getToken(), getTokenClaim: () => identity.getTokenClaim(), getAccountToken: () => identity.getAccountToken(),
   // Optional rooms must stay instant: only the owner's strict admission policy needs a local cache scan.
   getAssetCacheReadiness: (type) => {
     const state = assetCache.getState();

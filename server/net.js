@@ -88,15 +88,17 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 /** One logical player identity; survives socket reconnects for the reconnect window. */
 export class Session {
   /**
-   * @param {{ playerId: string, token: string, name: string, now?: number }} init
+   * @param {{ playerId: string, token: string, name: string, now?: number, accountId?: string|null }} init
    */
-  constructor({ playerId, token, name, now = Date.now() }) {
+  constructor({ playerId, token, name, now = Date.now(), accountId = null }) {
     /** @type {string} public id, shared with other players */
     this.playerId = playerId;
     /** @type {string} secret 128-bit hex reconnect token (only ever sent to its owner) */
     this.token = token;
     /** @type {string} sanitized nickname */
     this.name = name;
+    /** @type {string|null} authenticated account owner */
+    this.accountId = accountId;
     /** @type {import('ws').WebSocket | null} currently bound socket */
     this.ws = null;
     /** @type {boolean} */
@@ -125,6 +127,8 @@ export class Session {
     this.diy = null;
     /** @type {Readonly<Record<string, string>> | null} checked 干员皮肤 selection, `{ [baseChessId]: skinId }` (lobby-owned, docs/SKINS.md) */
     this.skins = null;
+    /** @type {((skins: Readonly<Record<string, string>>) => Promise<boolean>)|null} account-owned skin persistence hook */
+    this.saveSkins = null;
     /** @type {string} client address of the latest connection (logging) */
     this.addr = '?';
     /** @type {string | null} per-network limit key of the latest connection (null = not limited), see clientAddress */
@@ -151,9 +155,11 @@ export class SessionRegistry {
     this.now = now;
     /** @type {Map<string, Session>} */ this.byPlayerId = new Map();
     /** @type {Map<string, Session>} */ this.byTokenMap = new Map();
+    /** @type {Map<string, Session>} */ this.byAccountId = new Map();
   }
 
   get size() { return this.byPlayerId.size; }
+  byAccount(accountId) { return this.byAccountId.get(accountId) || null; }
 
   /**
    * Create a new session with a fresh playerId and token. Evicts the oldest idle (disconnected, roomless)
@@ -161,15 +167,16 @@ export class SessionRegistry {
    * @param {string} name
    * @returns {Session | null}
    */
-  create(name) {
+  create(name, accountId = null) {
     if (this.byPlayerId.size >= this.maxSessions && !this.evictOne()) return null;
     let playerId;
     do playerId = 'p_' + randomBytes(5).toString('hex'); while (this.byPlayerId.has(playerId));
     let token;
     do token = newToken(); while (this.byTokenMap.has(token));
-    const s = new Session({ playerId, token, name, now: this.now() });
+    const s = new Session({ playerId, token, name, now: this.now(), accountId });
     this.byPlayerId.set(playerId, s);
     this.byTokenMap.set(token, s);
+    if (accountId) this.byAccountId.set(accountId, s);
     return s;
   }
 
@@ -189,6 +196,7 @@ export class SessionRegistry {
   remove(s) {
     if (this.byPlayerId.get(s.playerId) === s) this.byPlayerId.delete(s.playerId);
     if (this.byTokenMap.get(s.token) === s) this.byTokenMap.delete(s.token);
+    if (s.accountId && this.byAccountId.get(s.accountId) === s) this.byAccountId.delete(s.accountId);
   }
 
   /**
@@ -563,12 +571,13 @@ export class Network {
    *   options?: Partial<typeof NET_DEFAULTS>,
    * }} opts
    */
-  constructor({ registry, handler, log = noopLog, now = Date.now, options = {} }) {
+  constructor({ registry, handler, log = noopLog, now = Date.now, options = {}, accounts = null }) {
     this.registry = registry;
     this.handler = handler;
     this.log = log;
     this.now = now;
     this.opts = { ...NET_DEFAULTS, ...options };
+    this.accounts = accounts;
     /** @type {Map<import('ws').WebSocket, Connection>} */
     this.conns = new Map();
     /** @type {Map<string, number>} open sockets per client network key */
@@ -716,7 +725,7 @@ export class Network {
       this.reply(conn, pong);
       return;
     }
-    if (msg.t === 'hello') { this.onHelloMsg(conn, msg, now); return; }
+    if (msg.t === 'hello') { void this.onHelloMsg(conn, msg, now).catch((e) => { this.log.error('[net] hello failed', e); this.reply(conn, errorMsg(ERR.INTERNAL, rid)); }); return; }
     if (!conn.session) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, 'hello required')); return; }
     // Lobby presence is a small summary and unsubscription is cleanup; only an opened paged directory
     // consumes the heavy-response budget. This keeps a rapid close/route change from leaving a stale watcher.
@@ -743,7 +752,7 @@ export class Network {
   }
 
   /** @param {Connection} conn @param {any} msg @param {number} now */
-  onHelloMsg(conn, msg, now) {
+  async onHelloMsg(conn, msg, now) {
     const rid = msg.rid;
     if (msg.version != null && msg.version !== PROTOCOL_VERSION) {
       this.reply(conn, errorMsg(ERR.BAD_MSG, rid, `version mismatch: server ${PROTOCOL_VERSION}`));
@@ -752,12 +761,19 @@ export class Network {
     const name = sanitizeName(msg.name);
     if (!name) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, 'bad field name')); return; }
 
+    let account = null;
+    if (msg.accountToken) {
+      account = await this.accounts?.authenticate(msg.accountToken);
+      if (!account) { this.reply(conn, errorMsg(ERR.BAD_MSG, rid, 'invalid account credentials')); return; }
+    }
     let session = conn.session;
     let resumed = false;
     const repeat = !!session;
     if (!session) {
-      session = msg.token ? this.registry.byToken(msg.token, { allowExpired: (s) =>
+      session = account ? this.registry.byAccount(account.id) : msg.token ? this.registry.byToken(msg.token, { allowExpired: (s) =>
         this.emergency.active && !!this.handler.allowEmergencyResume?.(s) }) : null;
+      if (session && this.registry.isExpired(session, this.now())
+        && !(this.emergency.active && this.handler.allowEmergencyResume?.(session))) session = null;
       // Upgrade cannot identify a resume token. Reject before allocating/replacing any identity,
       // while preserving running matches' original members' authenticated reconnects.
       if (this.emergency.active && (!session || !this.handler.allowEmergencyResume?.(session))) {
@@ -767,7 +783,7 @@ export class Network {
         return;
       }
       if (session) {
-        if (session.connected && session.ws && session.ws !== conn.ws
+        if (!account && session.connected && session.ws && session.ws !== conn.ws
           && (msg.noReplace || (Number.isFinite(msg.claimAt) && session.claimAt != null && msg.claimAt > session.claimAt))) {
           this.reply(conn, errorMsg(ERR.SESSION_IN_USE, rid));
           return;
@@ -775,7 +791,7 @@ export class Network {
         resumed = true;
         if (session.ws && session.ws !== conn.ws) this.detachReplaced(session.ws);
       } else {
-        session = this.registry.create(name);
+        session = this.registry.create(account?.username || name, account?.id || null);
         if (!session) { this.reply(conn, errorMsg(ERR.INTERNAL, rid, 'server full')); return; }
       }
       conn.session = session;
@@ -784,7 +800,14 @@ export class Network {
       session.claimAt = Number.isFinite(msg.claimAt) ? msg.claimAt : null;
       session.disconnectedAt = null;
     }
-    session.name = name;
+    if (account) {
+      session.accountId = account.id;
+      session.name = account.username;
+      session.skins = account.skins || session.skins;
+      session.saveSkins = (skins) => this.accounts.setSkins(account.id, skins);
+      this.registry.byAccountId.set(account.id, session);
+    }
+    session.name = account?.username || name;
     session.lastSeen = now;
     session.addr = conn.ip;
     session.limitKey = conn.key;
@@ -792,7 +815,7 @@ export class Network {
 
     let extra = null;
     try { extra = this.handler.welcomeInfo?.() ?? null; } catch (e) { this.log.error('[net] welcomeInfo crashed', e); }
-    const welcome = { ...(extra && typeof extra === 'object' ? extra : null), t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed,
+    const welcome = { ...(extra && typeof extra === 'object' ? extra : null), ...(account ? { accountSkins: account.skins || {} } : null), t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed,
       emergency: this.emergency };
     const wire = this.opts.compactWire && msg.wire === WIRE_VERSION ? WIRE_VERSION : 0;
     if (wire) welcome.wire = wire;

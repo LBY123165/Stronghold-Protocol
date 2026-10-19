@@ -15,6 +15,7 @@ import { serveAnnouncementAsset } from './announcementAssets.js';
 import { ASSET_CACHE_PREFIX } from './assetCache.js';
 import { buildTag } from './buildTag.js';
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
+import { clientAddress } from '../net.js';
 
 const MAX_URL_LENGTH = 4096;
 
@@ -43,10 +44,11 @@ export function healthReport({ startedAt, network, registry, lobby, bandwidthEme
  *           assetCache?: ReturnType<typeof import('./assetCache.js').createAssetCacheHandler> }} deps
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, announcements, assetCache, admin = null, emergency = () => null }) {
+export function createRequestHandler({ serveStatic, health, log, announcements, assetCache, admin = null, accounts = null, emergency = () => null }) {
   // Include in-flight ordinary assets/runtime/announcements, not just explicit filling. Emergency trip
   // releases these responses as well, so a cold visitor cannot retain its old streaming budget.
   const publicResponses = new Set();
+  const accountAttempts = new Map();
   function track(res) {
     publicResponses.add(res);
     const done = () => { publicResponses.delete(res); res.off('finish', done); res.off('close', done); };
@@ -62,6 +64,27 @@ export function createRequestHandler({ serveStatic, health, log, announcements, 
     //   * before the emergency gate, because an operator needs it exactly while the server protects itself.
     // It is its own mount (own auth, own 404 when disabled), never part of the public surface.
     if (admin && await admin(req, res, parts)) return;
+    if (accounts && req.method === 'POST' && ['/api/account/register', '/api/account/login'].includes(parts.rawPath)) {
+      const address = clientAddress(req).ip;
+      const now = Date.now();
+      const prior = accountAttempts.get(address);
+      const attempts = prior && now - prior.since < 5 * 60_000 ? prior.count : 0;
+      if (attempts >= 12) { res.setHeader('Retry-After', '300'); sendJson(req, res, 429, { error: 'RATE_LIMITED' }); return; }
+      if (accountAttempts.size > 4096) for (const [ip, item] of accountAttempts) if (now - item.since >= 5 * 60_000) accountAttempts.delete(ip);
+      const chunks = []; let size = 0;
+      for await (const chunk of req) { size += chunk.length; if (size > 8192) { sendJson(req, res, 413, { error: 'REQUEST_TOO_LARGE' }); return; } chunks.push(chunk); }
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { sendJson(req, res, 400, { error: 'BAD_REQUEST' }); return; }
+      const result = parts.rawPath.endsWith('/register')
+        ? await accounts.create(body?.username, body?.password)
+        : await accounts.login(body?.username, body?.password);
+      if (result.error) {
+        accountAttempts.set(address, { since: prior && now - prior.since < 5 * 60_000 ? prior.since : now, count: attempts + 1 });
+        const status = result.error === 'NAME_TAKEN' ? 409 : result.error === 'INVALID_INPUT' ? 400 : 401;
+        sendJson(req, res, status, { error: result.error });
+      } else { accountAttempts.delete(address); sendJson(req, res, 200, result); }
+      return;
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');

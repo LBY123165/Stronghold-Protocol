@@ -34,7 +34,7 @@ export function createSessionStack(opts, { data, log }) {
   const registry = new SessionRegistry({ reconnectWindowMs: netOptions.reconnectWindowMs ?? NET_DEFAULTS.reconnectWindowMs });
   const lobbyOptions = lobbyOptionsFrom(opts);
   const lobby = new Lobby({ registry, log, MatchClass: opts.MatchClass, getData: () => data, seedFn: opts.seedFn, options: lobbyOptions });
-  const network = new Network({ registry, handler: lobby, log, options: netOptions });
+  const network = new Network({ registry, handler: lobby, log, options: netOptions, accounts: opts.accounts || null });
   return { registry, lobby, network };
 }
 

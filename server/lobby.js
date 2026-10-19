@@ -878,6 +878,7 @@ export class Lobby {
   skins(session, { skins }) {
     const cleaned = freezeSkins(skins, (id) => lookup('chess', id, this.safeData()));
     session.skins = cleaned;
+    if (typeof session.saveSkins === 'function') void session.saveSkins(cleaned).catch((e) => this.log.warn?.(`[account] skin save failed: ${e.message}`));
     const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);

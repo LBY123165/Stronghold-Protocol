@@ -56,7 +56,7 @@ import { LoadoutHost } from './screens/loadout.js';
 import { StatsHost } from './screens/stats.js';
 import { recordResult, installStatsRecorder } from './ui/stats.js';
 import { installLoadoutSync, installOwnershipSync, installDiySync } from './ui/loadoutSync.js';
-import { installSkinsSync } from './ui/skins.js';
+import { installSkinsSync, setSkins } from './ui/skins.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 import { MAX_SEATS } from '../../shared/constants.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
@@ -169,6 +169,7 @@ function backToLobby() {
 
 function onWelcome(msg) {
   onEmergency(msg.emergency);
+  if (msg.accountSkins && typeof msg.accountSkins === 'object' && !Array.isArray(msg.accountSkins)) setSkins(msg.accountSkins);
   identity.saveToken(msg.token);
   identity.rememberMatch(null);
   const prev = store.get();

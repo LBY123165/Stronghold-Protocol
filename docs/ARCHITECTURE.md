@@ -25,7 +25,9 @@ effects), [DATA.md](DATA.md) (generated data), [ASSETS.md](ASSETS.md) (art and a
 
 - **The server** is one Node process: plain `node:http` plus `ws`, no framework (`server/index.js` wires
   `server/http/`). It serves the static client, the generated data and the sim's source files, and runs every room and
-  match in memory — rounds, shop, economy, bots, validation. This fork additionally reads private announcement files
+  match in memory — rounds, shop, economy, bots, validation. Accounts and skin preferences are persisted in
+  `.cache/accounts.json` (`server/accounts.js`, [ACCOUNT.md](ACCOUNT.md)); active sessions and matches remain in memory.
+  This fork additionally reads private announcement files
   and explicit owner-notification commands from disk ([ANNOUNCEMENTS.md](ANNOUNCEMENTS.md)); game state stays in memory.
 - **The browser** loads native ES modules with no bundler and no build step; the libraries are vendored into
   `public/vendor/` by `tools/vendor.mjs` on `npm install`.

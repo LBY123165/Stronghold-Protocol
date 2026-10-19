@@ -230,6 +230,9 @@
   background: linear-gradient(90deg, var(--mint-500), transparent 60%);
 }
 .title-login .btn--xl { letter-spacing: .6em; padding-left: calc(.48rem + .3em); }
+.title-auth-toggle { border: 0; padding: .04rem; color: var(--mint-300); background: transparent; font: inherit; font-size: calc(.14 * var(--t)); cursor: pointer; }
+.title-auth-toggle:hover { color: var(--text-hi); text-decoration: underline; }
+.title-auth-error { color: var(--red-300, #ff8e83); font-size: calc(.14 * var(--t)); line-height: 1.35; text-align: center; }
 .title-invite {
   display: flex;
   align-items: center;

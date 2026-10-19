@@ -27,6 +27,8 @@ import { t, N_ } from '../../../shared/i18n.js';
 import { scriptOf } from '../../../shared/i18nPacks.js';
 import { GIcon } from '../ui/gameComponents.js';
 import { SettingsModal } from '../ui/settings.js';
+import { setSkins } from '../ui/skins.js';
+import { normalizeAccountName } from '../../../shared/account.js';
 
 // Same character classes as server/net.js sanitizeName (control, zero-width, bidi, BOM), so a name
 // the client accepts is never rejected by the server's hello validation.
@@ -76,13 +78,14 @@ export const isValidName = (raw) => sanitizeName(raw).length > 0;
  * @param {string} rawName
  * @returns {boolean} false when the name is invalid
  */
-export function enterSession(rawName) {
+export function enterSession(rawName, { reconnect = false } = {}) {
   const name = sanitizeName(rawName);
   if (!name) return false;
   identity.saveName(name);
   identity.setEntered(true);
   store.set((s) => ({ me: { ...s.me, name }, session: { ...s.session, entered: true } }));
-  net.setName(name);
+  if (reconnect) net.reconnectNow(name);
+  else net.setName(name);
   return true;
 }
 
@@ -194,6 +197,10 @@ export function TitleScreen() {
   const pendingJoin = useStore((s) => s.ui.pendingJoin);
   useLang(); // re-render on a language switch
   const [name, setName] = useState(() => store.get().me.name || identity.loadName() || '');
+  const [password, setPassword] = useState('');
+  const [registering, setRegistering] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const assetsSettled = useData('assets');
   const assets = data.get('assets');
@@ -209,10 +216,30 @@ export function TitleScreen() {
   // CSS ridgelines only when there is no ridge art (avoids a swap flash when the art arrives).
   const cssRidges = assetsSettled && (!ridges || ridgesFailed);
 
-  const valid = isValidName(name);
-  const start = () => {
-    if (!valid) { toast(t('请输入博士代号'), 'warn'); return; }
-    enterSession(name);
+  const valid = !!normalizeAccountName(name) && password.length >= 8 && password.length <= 128;
+  const start = async () => {
+    if (!valid || authBusy) { if (!valid) toast(t('用户名需为 3 至 24 个字符，且至少含一个字母或数字；密码至少 8 位'), 'warn'); return; }
+    setAuthBusy(true); setAuthError('');
+    try {
+      const response = await fetch(`/api/account/${registering ? 'register' : 'login'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: normalizeAccountName(name), password }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const text = result.error === 'NAME_TAKEN' ? t('用户名已被注册')
+          : result.error === 'BAD_CREDENTIALS' ? t('用户名或密码错误')
+            : result.error === 'RATE_LIMITED' ? t('登录尝试过多，请 5 分钟后重试')
+            : result.error === 'INVALID_INPUT' ? t('用户名或密码格式不正确') : t('账号服务暂不可用');
+        setAuthError(text); return;
+      }
+      identity.setAccountToken(result.token);
+      setSkins(result.skins || {});
+      setPassword('');
+      enterSession(result.username, { reconnect: true });
+    } catch {
+      setAuthError(t('无法连接账号服务，请检查服务器连接'));
+    } finally { setAuthBusy(false); }
   };
 
   const online = conn.status === 'online' || conn.status === 'connected';
@@ -270,10 +297,17 @@ export function TitleScreen() {
           <${Icon} name="key" />
           <span>${t('收到同盟邀请')}</span><b class="num">${pendingJoin}</b><span class="t-lo">${t('· 输入代号后将自动加入')}</span>
         </div>` : null}
-        <${TextField} label=${t('博士代号')} micro="CALLSIGN" size="lg" icon="user" value=${name} maxLength=${NAME_MAX_LEN}
-          placeholder=${t('输入你的代号（最多 {NAME_MAX_LEN} 字）', { NAME_MAX_LEN })} autoFocus=${!touchUi}
-          onInput=${setName} onEnter=${start} />
-        <${Button} variant="primary" size="xl" block=${true} iconRight="chevrons" disabled=${!valid} onClick=${start}>${t('开始')}<//>
+        <${TextField} label=${t('用户名')} micro="ACCOUNT" size="lg" icon="user" value=${name} maxLength=${48}
+          placeholder=${t('3 至 24 个字符，至少含一个字母或数字')} autoFocus=${!touchUi}
+          onInput=${(v) => setName(v.trim())} onEnter=${start} name="username" autoComplete="username" />
+        <${TextField} label=${t('密码')} micro="PASSWORD" size="lg" icon="key" value=${password} maxLength=${128} type="password"
+          placeholder=${registering ? t('至少 8 位') : t('输入密码')} onInput=${setPassword} onEnter=${start}
+          name="password" autoComplete=${registering ? 'new-password' : 'current-password'} />
+        ${authError ? html`<div class="title-auth-error" role="alert">${authError}</div>` : null}
+        <${Button} variant="primary" size="xl" block=${true} iconRight="chevrons" disabled=${!valid || authBusy} loading=${authBusy} onClick=${start}>${registering ? t('注册并登录') : t('登录')}<//>
+        <button type="button" class="title-auth-toggle" onClick=${() => { setRegistering(!registering); setAuthError(''); }}>
+          ${registering ? t('已有账号？登录') : t('还没有账号？注册')}
+        </button>
         <div class="title-conn">
           <span class="title-conn__status"><span class=${`status-dot ${dotClass}`}></span>
             <span>${STATUS_TEXT[conn.status] ? t(STATUS_TEXT[conn.status]) : conn.status}</span></span>

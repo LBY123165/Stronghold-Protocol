@@ -23,6 +23,7 @@
 // The server only auto-listens when this file is the process entry point.
 
 import http from 'node:http';
+import path from 'node:path';
 import { getData, loadData } from './data.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
@@ -40,6 +41,7 @@ import { answerClientError } from './http/common.js';
 import { lanUrls, displayHost, isProcessEntry, runMain } from './http/boot.js';
 import { createAdminService, createLogRing, readAdminSecret, withLogRing } from './admin.js';
 import { createAdminHandler } from './http/admin.js';
+import { createAccountStore } from './accounts.js';
 
 // The public API of this module (tests and tools import it from here); the code lives in ./http/.
 export {
@@ -52,7 +54,7 @@ export {
  * @param {{
  *   port?: number, host?: string, quiet?: boolean, log?: object,
  *   publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, announcementsDir?: string,
- *   serverSettingsDir?: string,
+ *   serverSettingsDir?: string, accountsFile?: string,
  *   MatchClass?: Function, seedFn?: () => number,
  *   lobbyGraceMs?: number, reconnectWindowMs?: number, heartbeatMs?: number, helloTimeoutMs?: number,
  *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number, compactWire?: boolean, runtimeCache?: boolean,
@@ -86,7 +88,9 @@ export async function startServer(opts = {}) {
   const data = opts.dataDir ? loadData(dataDir, { log }) : getData({ dir: dataDir, log });
   const serverSettings = createServerSettings({ dir: opts.serverSettingsDir, root: ROOT, log,
     onChange: (next) => applySettings(next) });
-  const { registry, lobby, network } = createSessionStack(opts, { data, log });
+  const accounts = createAccountStore({ file: opts.accountsFile || path.join(ROOT, '.cache', 'accounts.json'), log });
+  await accounts.ready;
+  const { registry, lobby, network } = createSessionStack({ ...opts, accounts }, { data, log });
   const announcements = createAnnouncementStore({ dir: opts.announcementsDir, root: ROOT, log });
   const announcementNotices = createAnnouncementNoticeMonitor({ store: announcements, network, log });
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
@@ -147,7 +151,7 @@ export async function startServer(opts = {}) {
     ring: logRing, log, startedAt, build: buildTag,
   });
   const admin = createAdminHandler({ admin: adminService, serveStatic, log });
-  requestHandler = createRequestHandler({ serveStatic, announcements, assetCache, admin,
+  requestHandler = createRequestHandler({ serveStatic, announcements, assetCache, admin, accounts,
     emergency: () => network.emergency, health: { startedAt, network, registry, lobby, bandwidthEmergency }, log });
   const server = http.createServer(requestHandler);
   server.on('clientError', answerClientError);
