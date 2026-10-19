@@ -669,9 +669,9 @@
    264–379 px tall there, which made 皮肤 the ONE section of that panel no phone could see whole (the 潜能与练度 / 技能 /
    局内数值 / 模组 sections are 135–163 px in the same panel). On that short, narrow panel the tile draws the 1:1 avatar
    — the shape of the roster's own `.lo-card__art` — five to the row, and the section is 216 px at 844×390: it fits. */
-.lo-skins { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .1rem; align-items: start; }
+.lo-skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(1.1rem, 72px), 1fr)); gap: max(.08rem, 6px); align-items: start; }
 .lo-skin {
-  position: relative; min-width: 0; display: flex; flex-direction: column; gap: .04rem; padding: .06rem;
+  position: relative; min-width: 0; display: flex; flex-direction: column; gap: max(.03rem, 3px); padding: max(.04rem, 4px);
   font: inherit; color: var(--text-md); text-align: left; cursor: pointer;
   background: rgba(255, 255, 255, .025); border: 1px solid var(--line);
   transition: background var(--t-fast), border-color var(--t-fast); touch-action: manipulation;
@@ -680,19 +680,20 @@
 .lo-skin:active { transform: scale(.98); }
 .lo-skin:focus-visible { outline: 2px solid var(--mint-400); outline-offset: 2px; }
 .lo-skin.is-on { color: var(--text-hi); background: linear-gradient(180deg, rgba(78, 216, 175, .14), rgba(78, 216, 175, .02) 75%); border-color: rgba(78, 216, 175, .7); }
+/* 小正方形卡片（照 0.2.4 版的 72px 见方）：1:2 立绘在方框里居中裁切，头像类皮肤因此也读得清 */
 .lo-skin__art {
-  position: relative; aspect-ratio: 1 / 2; min-height: max(1.5rem, 130px); overflow: hidden;
+  position: relative; aspect-ratio: 1 / 1; height: max(1.1rem, 72px); min-height: 0; overflow: hidden;
   background: rgba(0, 0, 0, .35); border: 1px solid var(--line);
 }
 .lo-skin__art img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
-/* the appearance's 1:1 avatar of the same tile, drawn only where the 1:2 box does not fit (the media query at the end) */
+/* the appearance's 1:1 avatar of the same tile, drawn only where the 1:1 box does not fit (the media query at the end) */
 .lo-skin__art > .lo-skin__art--faceimg { display: none; }
 .lo-skin__art--none { position: absolute; inset: 0; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, .06) 0 3px, transparent 3px 7px); }
 /* the art shown is the operator's own (the skin ships none): the name and the series still say which skin this is */
 .lo-skin--fallback .lo-skin__art { opacity: .72; }
 .lo-skin__text { min-width: 0; display: flex; flex-direction: column; gap: .01rem; }
-.lo-skin__name { font-size: max(.16rem, 11px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lo-skin__group { font-family: var(--font-num); font-size: max(.12rem, 9px); letter-spacing: .06em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lo-skin__name { font-size: max(.13rem, 10px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lo-skin__group { font-family: var(--font-num); font-size: max(.1rem, 8px); letter-spacing: .04em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the enlarged view: the 立绘 (whole, not the cropped tile), as large as the modal allows */
 .lo-skin-preview { display: flex; align-items: center; justify-content: center; }
 .lo-skin-preview img { display: block; max-width: 100%; max-height: 65dvh; object-fit: contain; }
