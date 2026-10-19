@@ -142,8 +142,12 @@ export function availableSkins(charId) {
     const playable = skinHasModel(skin);
     // the tile art: the fixed-size portrait family first (a 1:2 box the grid lines up on), then the illustration, then
     // the avatar; the operator's own portrait when the skin ships none (`fallbackArt`, which the picker draws a little
-    // differently so a plugin that replaced only the model is legible)
-    const ownArt = str(skin.portrait) || str(skin.illust);
+    // differently so a plugin that replaced only the model is legible).
+    //
+    // The avatar IS art of this skin: an installation whose skins ship a 180×180 avatar and a model but no 1:2 portrait
+    // (the 干员皮肤 set does) must still show a different tile per skin — without it every tile falls back to the
+    // operator's portrait and the picker looks like "all skins are the operator" (reported 2026-10-19).
+    const ownArt = str(skin.portrait) || str(skin.illust) || str(skin.avatar);
     const portrait = ownArt || ownPortrait;
     const avatar = str(skin.avatar) || str(skin.illust) || ownAvatar;
     const illust = str(skin.illust) || portrait;
