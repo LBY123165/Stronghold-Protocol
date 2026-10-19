@@ -1,5 +1,4 @@
 {
-  "离线导入（不下载官方数据表）": "Import offline (do not download official data tables)",
   "_meta": {
     "type": "lang",
     "lang": "en",
@@ -15,6 +14,7 @@
     "complete": true
   },
   "_about": "English UI strings: Chinese msgid → English (shared/i18n.js t(); docs/I18N.md). Placeholders {name} and {n|one|other} as in the msgid; a 'context::msgid' key is a tc() variant. Seeded from GitHub PR #70 (branch en-translation) by @YuriRestia, reused with credit (NOTICE.md). Game texts are not here: data/i18n/en.json (tools/build-i18n.mjs).",
+  "离线导入（不下载官方数据表）": "Import offline (do not download official data tables)",
   "你已在其他同盟中，请先离开当前同盟": "You are already in another Alliance. Leave it first.",
   "你已不在该同盟中": "You are no longer in this Alliance",
   "创建者已离开，同盟已解散": "The host left. The Alliance has been disbanded.",
@@ -2188,5 +2188,21 @@
   "删除这台浏览器里、当前服务器版本已经用不到的导入素材；仍在使用的会保留。": "Delete the imported assets in this browser that this server's current version no longer uses; the ones still in use stay.",
   "已清理 {n} 个旧版本文件。": "Cleared {n} old-version files.",
   "没有需要清理的旧版本文件。": "No old-version files to clear.",
-  "读不到服务器的素材清单，没有删除任何文件。": "Could not read the server's asset lists; nothing was deleted."
+  "读不到服务器的素材清单，没有删除任何文件。": "Could not read the server's asset lists; nothing was deleted.",
+  "同盟席位": "Room capacity",
+  "已达到服务器允许的 AI 队友上限": "The server's AI-teammate limit is reached",
+  "房主": "Host",
+  "由房主选择": "Chosen by the host",
+  "人数上限": "Capacity",
+  "人": "players",
+  "调整同盟人数上限": "Change the room capacity",
+  "先移除超出席位的玩家": "Remove the players in the dropped seats first",
+  "{n} 人房间": "{n}-player room",
+  "由房主设置": "Set by the host",
+  "本分支固定由在线且未托管的博士先选，AI、托管和掉线席位随后选择": "This branch always lets online, unmanaged players pick first; AI, managed and disconnected seats follow.",
+  "固定规则": "Fixed rule",
+  "你是同盟的房主，离开后房主身份将移交或同盟解散。确定离开吗？": "You host this alliance; leaving hands the host role over or disbands it. Leave?",
+  "已就绪 · 等待房主开始模拟": "Ready · waiting for the host to start",
+  "准备就绪后，房主即可开始模拟": "The host can start once everyone is ready",
+  "投票通过：本轮结束后跳过后续全部联防，按剩余漏怪结算": "Vote passed: after this round every later unite round is skipped and the remaining leaks settle as they stand"
 }

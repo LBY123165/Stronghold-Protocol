@@ -122,7 +122,7 @@ export function inviteLink(code) {
  */
 export { copyText };
 
-export function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot, onKick, onTransferHost }) {
+export function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot, onKick }) {
   const coop = room.mode !== 'solo';
   if (!seat) {
     const canAdd = coop && facts.isHost;
@@ -177,10 +177,6 @@ export function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRem
           : html`<${Icon} name="hourglass" />${t('准备中')}`}
       </span>
       ${facts.isHost && (seat.isBot || !isMe) ? html`<div class="seat__actions">
-        ${!seat.isBot && !offline && facts.transferableHumans.some((s) => s.playerId === seat.playerId) ? html`<${Tooltip} text=${t('转让房主给该博士')}>
-          <${Button} variant="secondary" size="sm" square=${true} icon="crown" loading=${busy === `transfer${index}`}
-            disabled=${!!busy} onClick=${() => onTransferHost(index, seat.name, seat.playerId)} aria-label=${t('转让房主给该博士')} />
-        <//>` : null}
         ${seat.isBot ? html`<${Tooltip} text=${t('移除该 AI 队友')}>
           <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `rm${index}`} disabled=${!!busy}
             onClick=${() => onRemoveBot(index, seat.playerId)} aria-label=${t('移除 AI 队友')} />
@@ -241,20 +237,7 @@ function DifficultyPicker({ room, isHost, busy, onPick }) {
   </div>`;
 }
 
-/** Waiting-room policy follows room.state, including the permission change after host transfer. */
-export function MatchmakingControl({ facts, busy, connected, onChange }) {
-  const on = facts.allowMatchmaking;
-  const label = on ? t('允许匹配') : t('禁止匹配');
-  const hint = t('关闭后不会参与最快匹配，也不能从房间列表加入；持有邀请码仍可加入，观战不受影响。');
-  const cls = `room-matchmaking${on ? ' is-on' : ' is-private'}`;
-  return facts.canSetMatchmaking
-    ? html`<button type="button" class=${`${cls} tapx`} role="switch" aria-checked=${on ? 'true' : 'false'}
-        aria-label=${t('允许匹配')} title=${hint} data-testid="room-matchmaking"
-        disabled=${!!busy || !connected} onClick=${() => onChange(!on)}><${Icon} name=${on ? 'check' : 'close'} />${label}</button>`
-    : html`<span class=${cls} role="status" title=${hint} data-testid="room-matchmaking-state"><${Icon} name=${on ? 'check' : 'close'} />${label}</span>`;
-}
-
-function CapacityPicker({ room, facts, busy, connected, onPick, onMatchmaking }) {
+function CapacityPicker({ room, facts, busy, connected, onPick }) {
   const capacity = room.capacity || facts.seats.length;
   const minCapacity = Math.max(1, ...facts.occupied.map((s) => s.seat + 1));
   return html`<div class="room-capacity" aria-label=${t('同盟席位')}>
@@ -266,12 +249,6 @@ function CapacityPicker({ room, facts, busy, connected, onPick, onMatchmaking })
         onClick=${() => n !== capacity && onPick(n)}>${n}</button>`)}
     </div>` : html`<span class="t-dim">${t('由房主设置')}</span>`}
     <span class="room-capacity__count num">${facts.occupied.length} / ${capacity}</span>
-    <${MatchmakingControl} facts=${facts} busy=${busy} connected=${connected} onChange=${onMatchmaking} />
-    ${facts.maxAiPerRoom !== null ? html`<span class=${`room-ai-limit${facts.aiLimitReached ? ' is-full' : ''}`} role="status"
-        title=${facts.aiLimitReached ? t('已达到服务器允许的 AI 队友上限') : t('服主设置的每房 AI 队友上限')}>
-      <${Icon} name="robot" />${t('AI 队友 {used} / {limit}', { used: facts.botCount, limit: facts.maxAiPerRoom })}
-      ${facts.aiLimitReached ? html`<span>${t('已达上限')}</span>` : null}
-    </span>` : null}
   </div>`;
 }
 
@@ -327,15 +304,8 @@ export function RoomScreen() {
     const ok = await confirmDialog({ title: t('移出同盟'), text: t('确定将「{name}」移出同盟吗？对方可以凭同盟密钥重新加入。', { name: name || t('博士') }), okText: t('移出'), danger: true });
     if (ok) await net.request('room.kick', { seat, playerId });
   });
-  const transferHost = (seat, name, playerId) => run(`transfer${seat}`, async () => {
-    const ok = await confirmDialog({ title: t('转让房主'),
-      text: t('确定将房主转让给「{name}」吗？双方将交换席位，新房主位于 P1。', { name: name || t('博士') }),
-      okText: t('转让') });
-    if (ok) await net.request('room.transferHost', { playerId });
-  });
   const setDifficulty = (difficulty) => run('diff', () => net.request('room.setDifficulty', { difficulty }));
   const setCapacity = (capacity) => run('capacity', () => net.request('room.setCapacity', { capacity }));
-  const setMatchmaking = (allowed) => run('matchmaking', () => net.request('room.setMatchmaking', { allowed }));
   // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room
   const removeSpectator = (playerId) => run(`rs${playerId}`, () => net.request('room.removeSpectator', { playerId }));
   const sit = () => run('sit', () => net.request('room.join', { code: room.code, ...(room.test ? { testAck: true } : {}) }));
@@ -401,10 +371,10 @@ export function RoomScreen() {
       </div>
     </header>
 
-    ${coop ? html`<${CapacityPicker} room=${room} facts=${facts} busy=${busy} connected=${online} onPick=${setCapacity} onMatchmaking=${setMatchmaking} />` : null}
+    ${coop ? html`<${CapacityPicker} room=${room} facts=${facts} busy=${busy} connected=${online} onPick=${setCapacity} />` : null}
     <main class=${`seats${coop ? facts.seats.length > 10 ? ' seats--dense' : facts.seats.length > 4 ? ' seats--expanded' : '' : ' seats--solo'}${coop && facts.seats.length === 10 ? ' seats--ten' : ''}`}>
       ${facts.seats.map((s, i) => html`<${SeatCard} key=${s ? `p${s.playerId}` : `e${i}`} seat=${s} index=${i} room=${room} facts=${facts}
-        myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} onTransferHost=${transferHost} />`)}
+        myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} />`)}
       ${coop ? null : html`<aside class="solo-brief brackets">
         <${MicroLabel} tone="mint">BRIEFING<//>
         <h2>${DIFFICULTY_NAMES[room.difficulty] ? t(DIFFICULTY_NAMES[room.difficulty]) : ''}<span class="num t-dim"> ${info.code}</span></h2>
