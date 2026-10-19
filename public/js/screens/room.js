@@ -1,6 +1,7 @@
-// Room screen (同盟等待室): 4 seat cards (avatar frame, name, ready state, AI badge, host crown),
-// host controls (difficulty picker, add/remove AI and the 「AI 队友最后选择」 switch in co-op, start), invite code with
-// copy code / copy link, ready toggle and leave.
+// Room screen (同盟等待室): configurable seat cards (avatar frame, name, ready state, AI badge, host crown),
+// host controls (difficulty picker, add/remove AI in co-op, start), invite code with copy code /
+// copy link, ready toggle and leave.
+// The capacity branch keeps manual humans first within every fixed draft group (D004); the room shows it read-only.
 //
 // Start rule (server/lobby.js): room.start needs every *other* human connected and ready; the
 // host's start counts as the host's ready. So 开始模拟 is enabled exactly then and sends room.start
@@ -17,7 +18,7 @@
 // Texts go through t() (docs/I18N.md).
 
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, DEFAULT_SEATS, ROOM_CAPACITIES, MAX_SPECTATORS } from '../../../shared/constants.js';
 import {
   html, Button, Icon, MicroLabel, PingPill, AvatarFrame, DifficultyTag, DifficultyIcon, Tooltip, confirmDialog, doctorNo, Modal,
 } from '../ui/components.js';
@@ -25,6 +26,7 @@ import { toast, toastError } from '../ui/toasts.js';
 import { TestMark } from '../ui/testConsole.js';
 import { copyText } from '../ui/clipboard.js';
 import { GuideButton } from '../ui/guide.js';
+import { AssetCacheButton } from '../ui/assetCache.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
 import { LoadoutButton } from './loadout.js';
@@ -36,13 +38,14 @@ import { difficultyInfo } from './lobby.js';
 import { t, tc } from '../../../shared/i18n.js';
 
 /**
- * Seats padded to the room's capacity (co-op 4, solo 1), each null or a seat record.
+ * Seats padded to the room's capacity (co-op 4–20, solo 1), each null or a seat record.
  * @param {any} room room.state payload
  * @returns {(null | {seat:number, playerId:any, name:string, isBot:boolean, ready:boolean, connected:boolean})[]}
  */
 export function normalizeSeats(room) {
-  const cap = room?.mode === 'solo' ? 1 : MAX_SEATS;
   const src = Array.isArray(room?.seats) ? room.seats : [];
+  const requested = Number.isInteger(room?.capacity) ? room.capacity : src.length || DEFAULT_SEATS;
+  const cap = room?.mode === 'solo' ? 1 : Math.max(1, Math.min(MAX_SEATS, requested));
   const out = [];
   for (let i = 0; i < cap; i++) {
     const s = src[i];
@@ -68,13 +71,21 @@ export function roomFacts(room, myId) {
   const isReady = (s) => !!s.ready || s.playerId === room?.hostId;
   const readyHumans = humans.filter(isReady).length;
   const othersReady = others.every((s) => s.ready && s.connected !== false);
+  const emptySeats = seats.filter((s) => !s).length;
+  const botCount = occupied.filter((s) => s.isBot).length;
+  const maxAiPerRoom = Number.isInteger(room?.maxAiPerRoom) && room.maxAiPerRoom >= 0 ? room.maxAiPerRoom : null;
+  const aiLimitReached = maxAiPerRoom !== null && botCount >= maxAiPerRoom;
+  const aiLimitExceeded = maxAiPerRoom !== null && botCount > maxAiPerRoom;
+  const waiting = !room?.inMatch;
   // a room with gameplay plugins (DESIGN §32.6): every player's page has loaded and checked its content (the host's too)
   const modded = isModdedRoom(room);
   const contentReady = !modded || humans.every((s) => s.content === 'ready');
   return {
     seats, occupied, humans, mine, isHost, readyHumans, isReady,
-    emptySeats: seats.filter((s) => !s).length,
-    canStart: isHost && othersReady && !!mine && contentReady && (!room?.content?.trusted || humans.every(s => room.content.trusted.consent[s.seat])),
+    emptySeats, botCount, maxAiPerRoom, aiLimitReached, aiLimitExceeded,
+    canAddBot: waiting && isHost && room?.mode !== 'solo' && emptySeats > 0 && !aiLimitReached,
+    canStart: waiting && isHost && othersReady && !!mine && contentReady && !aiLimitExceeded
+      && (!room?.content?.trusted || humans.every(s => room.content.trusted.consent[s.seat])),
     othersReady,
     modded,
     contentReady,
@@ -86,16 +97,15 @@ export function roomFacts(room, myId) {
 }
 
 /**
- * The co-op room option 「AI 队友最后选择」 (GitHub #338; room.setAiPicksLast, room.state.aiPicksLast): in the strategy and
- * 机变 drafts every human picks before the AI teammates. null in a solo room (no AI teammates); otherwise its state (off
- * when the server sends none) and whether this player may switch it — the host only, the others see it read-only.
+ * The upstream 「AI 队友最后选择」 indicator follows D004 in this branch: online manual humans choose before AI,
+ * managed and disconnected seats within each fixed group. Solo rooms have no teammates; co-op always shows it on
+ * and read-only, including frames from an older server that omit the flag.
  * @param {any} room room.state payload
- * @param {any} myId
  * @returns {{ on: boolean, editable: boolean } | null}
  */
-export function aiLastOption(room, myId) {
+export function aiLastOption(room) {
   if (!room || room.mode === 'solo') return null;
-  return { on: room.aiPicksLast === true, editable: room.hostId != null && room.hostId === myId };
+  return { on: true, editable: false };
 }
 
 /** Invite link for a room code (current page URL with ?room=CODE). */
@@ -113,7 +123,7 @@ export function inviteLink(code) {
  */
 export { copyText };
 
-function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot, onKick }) {
+export function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot, onKick, onTransferHost }) {
   const coop = room.mode !== 'solo';
   if (!seat) {
     const canAdd = coop && facts.isHost;
@@ -126,7 +136,9 @@ function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot,
       </div>
       <footer class="seat__foot">
         ${canAdd
-          ? html`<${Button} variant="secondary" size="sm" icon="robot" block=${true} loading=${busy === `add`} onClick=${onAddBot}>${t('添加 AI 队友')}<//>`
+          ? html`<${Button} variant="secondary" size="sm" icon="robot" block=${true} loading=${busy === `add`}
+              disabled=${!!busy || !facts.canAddBot} title=${facts.aiLimitReached ? t('已达到服务器允许的 AI 队友上限') : undefined}
+              onClick=${onAddBot}>${t('添加 AI 队友')}<//>`
           : html`<span class="seat__state t-dim">${t('空位')}</span>`}
       </footer>
     </article>`;
@@ -143,7 +155,7 @@ function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot,
     <header class="seat__head">
       <span class="seat__no num">P${index + 1}</span>
       <${MicroLabel}>SEAT ${String(index + 1).padStart(2, '0')}<//>
-      ${isHostSeat ? html`<span class="seat__host"><${Icon} name="crown" />${t('创建者')}</span>` : null}
+      ${isHostSeat ? html`<span class="seat__host"><${Icon} name="crown" />${t('房主')}</span>` : null}
     </header>
     <div class="seat__art">
       <div class="seat__stripes" aria-hidden="true"></div>
@@ -165,12 +177,19 @@ function SeatCard({ seat, index, room, facts, myId, busy, onAddBot, onRemoveBot,
           : state === 'host' ? html`<${Icon} name="crown" />${t('待命中')}`
           : html`<${Icon} name="hourglass" />${t('准备中')}`}
       </span>
-      ${seat.isBot && facts.isHost ? html`<${Tooltip} text=${t('移除该 AI 队友')}>
-        <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `rm${index}`} onClick=${() => onRemoveBot(index)} aria-label=${t('移除 AI 队友')} />
-      <//>` : null}
-      ${!seat.isBot && !isMe && facts.isHost ? html`<${Tooltip} text=${t('将该博士移出同盟')}>
-        <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `kick${index}`} onClick=${() => onKick(index, seat.name, seat.playerId)} aria-label=${t('移出该博士')} />
-      <//>` : null}
+      ${facts.isHost && (seat.isBot || !isMe) ? html`<div class="seat__actions">
+        ${!seat.isBot && !offline && facts.transferableHumans.some((s) => s.playerId === seat.playerId) ? html`<${Tooltip} text=${t('转让房主给该博士')}>
+          <${Button} variant="secondary" size="sm" square=${true} icon="crown" loading=${busy === `transfer${index}`}
+            disabled=${!!busy} onClick=${() => onTransferHost(index, seat.name, seat.playerId)} aria-label=${t('转让房主给该博士')} />
+        <//>` : null}
+        ${seat.isBot ? html`<${Tooltip} text=${t('移除该 AI 队友')}>
+          <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `rm${index}`} disabled=${!!busy}
+            onClick=${() => onRemoveBot(index, seat.playerId)} aria-label=${t('移除 AI 队友')} />
+        <//>` : html`<${Tooltip} text=${t('将该博士移出同盟')}>
+          <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `kick${index}`} disabled=${!!busy}
+            onClick=${() => onKick(index, seat.name, seat.playerId)} aria-label=${t('移出该博士')} />
+        <//>`}
+      </div>` : null}
     </footer>
   </article>`;
 }
@@ -211,7 +230,7 @@ function DifficultyPicker({ room, isHost, busy, onPick }) {
   if (!isHost) {
     return html`<div class="dpick dpick--ro">
       <${DifficultyTag} difficulty=${room.difficulty} size="lg" code=${difficultyInfo(room.mode, room.difficulty).code} />
-      <span class="t-dim">${t('由创建者选择')}</span>
+      <span class="t-dim">${t('由房主选择')}</span>
     </div>`;
   }
   return html`<div class="dpick" role="radiogroup" aria-label=${t('模拟难度')}>
@@ -223,18 +242,51 @@ function DifficultyPicker({ room, isHost, busy, onPick }) {
   </div>`;
 }
 
-/** The 「AI 队友最后选择」 switch (co-op): the host toggles it, everybody else sees its state. */
-function AiLastToggle({ option, busy, onToggle }) {
+/** Waiting-room policy follows room.state, including the permission change after host transfer. */
+export function MatchmakingControl({ facts, busy, connected, onChange }) {
+  const on = facts.allowMatchmaking;
+  const label = on ? t('允许匹配') : t('禁止匹配');
+  const hint = t('关闭后不会参与最快匹配，也不能从房间列表加入；持有邀请码仍可加入，观战不受影响。');
+  const cls = `room-matchmaking${on ? ' is-on' : ' is-private'}`;
+  return facts.canSetMatchmaking
+    ? html`<button type="button" class=${`${cls} tapx`} role="switch" aria-checked=${on ? 'true' : 'false'}
+        aria-label=${t('允许匹配')} title=${hint} data-testid="room-matchmaking"
+        disabled=${!!busy || !connected} onClick=${() => onChange(!on)}><${Icon} name=${on ? 'check' : 'close'} />${label}</button>`
+    : html`<span class=${cls} role="status" title=${hint} data-testid="room-matchmaking-state"><${Icon} name=${on ? 'check' : 'close'} />${label}</span>`;
+}
+
+function CapacityPicker({ room, facts, busy, connected, onPick, onMatchmaking }) {
+  const capacity = room.capacity || facts.seats.length;
+  const minCapacity = Math.max(1, ...facts.occupied.map((s) => s.seat + 1));
+  return html`<div class="room-capacity" aria-label=${t('同盟席位')}>
+    <span class="room-capacity__label">${t('人数上限')} <b class="num">${capacity}</b> ${t('人')}</span>
+    ${facts.isHost ? html`<div class="room-capacity__options" role="radiogroup" aria-label=${t('调整同盟人数上限')}>
+      ${ROOM_CAPACITIES.map((n) => html`<button key=${n} type="button" role="radio" aria-checked=${capacity === n ? 'true' : 'false'}
+        class=${`room-capacity__opt${capacity === n ? ' is-active' : ''}`} disabled=${!!busy || n < minCapacity}
+        title=${n < minCapacity ? t('先移除超出席位的玩家') : t('{n} 人房间', { n })}
+        onClick=${() => n !== capacity && onPick(n)}>${n}</button>`)}
+    </div>` : html`<span class="t-dim">${t('由房主设置')}</span>`}
+    <span class="room-capacity__count num">${facts.occupied.length} / ${capacity}</span>
+    <${MatchmakingControl} facts=${facts} busy=${busy} connected=${connected} onChange=${onMatchmaking} />
+    ${facts.maxAiPerRoom !== null ? html`<span class=${`room-ai-limit${facts.aiLimitReached ? ' is-full' : ''}`} role="status"
+        title=${facts.aiLimitReached ? t('已达到服务器允许的 AI 队友上限') : t('服主设置的每房 AI 队友上限')}>
+      <${Icon} name="robot" />${t('AI 队友 {used} / {limit}', { used: facts.botCount, limit: facts.maxAiPerRoom })}
+      ${facts.aiLimitReached ? html`<span>${t('已达上限')}</span>` : null}
+    </span>` : null}
+  </div>`;
+}
+
+/** D004 is a fixed co-op rule, including managed and disconnected human seats after manual humans. */
+function AiLastRule({ option }) {
   if (!option) return null;
   return html`<div class="ailast">
-    <${Tooltip} text=${t('策略与机变轮选时，所有博士先于 AI 队友选择')}>
+    <${Tooltip} text=${t('本分支固定由在线且未托管的博士先选，AI、托管和掉线席位随后选择')}>
       <button type="button" role="switch" aria-checked=${option.on ? 'true' : 'false'}
-          class=${`dpick__opt ailast__opt${option.on ? ' is-active' : ''}`} disabled=${!option.editable || !!busy}
-          onClick=${() => option.editable && onToggle(!option.on)}>
+          class=${`dpick__opt ailast__opt${option.on ? ' is-active' : ''}`} disabled=${true}>
         <${Icon} name="check" class=${option.on ? 'is-on' : ''} />${t('AI 队友最后选择')}
       </button>
     <//>
-    ${option.editable ? null : html`<span class="t-dim">${t('由创建者设置')}</span>`}
+    <span class="t-dim">${t('固定规则')}</span>
   </div>`;
 }
 
@@ -269,16 +321,22 @@ export function RoomScreen() {
   const toggleReady = () => run('ready', () => net.request('room.ready', { ready: !myReady }));
   const start = () => run('start', () => net.request('room.start', {}));
   const addBot = () => run('add', () => net.request('room.addBot', {}));
-  const removeBot = (seat) => run(`rm${seat}`, () => net.request('room.removeBot', { seat }));
+  const removeBot = (seat, playerId) => run(`rm${seat}`, () => net.request('room.removeBot', { seat, playerId }));
   // the host removes a human before the match (community report #17): asked first; the player may join again. The
   // confirmed player's id goes along: if they left and someone else took the seat meanwhile, the server refuses it.
-  const kick = async (seat, name, playerId) => {
-    if (inFlight.current) return;
+  const kick = (seat, name, playerId) => run(`kick${seat}`, async () => {
     const ok = await confirmDialog({ title: t('移出同盟'), text: t('确定将「{name}」移出同盟吗？对方可以凭同盟密钥重新加入。', { name: name || t('博士') }), okText: t('移出'), danger: true });
-    if (ok) run(`kick${seat}`, () => net.request('room.kick', { seat, playerId }));
-  };
+    if (ok) await net.request('room.kick', { seat, playerId });
+  });
+  const transferHost = (seat, name, playerId) => run(`transfer${seat}`, async () => {
+    const ok = await confirmDialog({ title: t('转让房主'),
+      text: t('确定将房主转让给「{name}」吗？双方将交换席位，新房主位于 P1。', { name: name || t('博士') }),
+      okText: t('转让') });
+    if (ok) await net.request('room.transferHost', { playerId });
+  });
   const setDifficulty = (difficulty) => run('diff', () => net.request('room.setDifficulty', { difficulty }));
-  const setAiLast = (on) => run('ailast', () => net.request('room.setAiPicksLast', { on }));
+  const setCapacity = (capacity) => run('capacity', () => net.request('room.setCapacity', { capacity }));
+  const setMatchmaking = (allowed) => run('matchmaking', () => net.request('room.setMatchmaking', { allowed }));
   // spectator seats: the host frees one; a spectator takes a free player seat with room.join of this room
   const removeSpectator = (playerId) => run(`rs${playerId}`, () => net.request('room.removeSpectator', { playerId }));
   const sit = () => run('sit', () => net.request('room.join', { code: room.code, ...(room.test ? { testAck: true } : {}) }));
@@ -286,7 +344,7 @@ export function RoomScreen() {
     if (inFlight.current) return;
     const othersHere = facts.humans.some((s) => s.playerId !== me.playerId);
     if (facts.isHost && othersHere) {
-      const ok = await confirmDialog({ title: t('离开同盟'), text: t('你是同盟的创建者，离开后创建者身份将移交或同盟解散。确定离开吗？'), okText: t('离开'), danger: true });
+      const ok = await confirmDialog({ title: t('离开同盟'), text: t('你是同盟的房主，离开后房主身份将移交或同盟解散。确定离开吗？'), okText: t('离开'), danger: true });
       if (!ok) return;
     }
     inFlight.current = true;
@@ -316,12 +374,13 @@ export function RoomScreen() {
         ? html`<span class="t-mint">${t('*同盟人数达标，准许进入模拟')}</span>`
         : html`<span class="t-lo">${t('等待所有博士准备就绪')}</span>`
       : myReady
-        ? html`<span class="t-mint">${t('已就绪 · 等待创建者开始模拟')}</span>`
-        : html`<span class="t-lo">${t('准备就绪后，创建者即可开始模拟')}</span>`;
+        ? html`<span class="t-mint">${t('已就绪 · 等待房主开始模拟')}</span>`
+        : html`<span class="t-lo">${t('准备就绪后，房主即可开始模拟')}</span>`;
 
   return html`<div class="screen room-screen">
     <header class="topbar">
       <div class="topbar__left">
+        <${AssetCacheButton} compact=${true} />
         <${Tooltip} text=${t('离开同盟')} placement="bottom">
           <${Button} variant="danger" size="lg" square=${true} icon="exit" loading=${busy === 'leave'} onClick=${leave} aria-label=${t('离开同盟')} />
         <//>
@@ -344,9 +403,10 @@ export function RoomScreen() {
       </div>
     </header>
 
-    <main class=${`seats${coop ? '' : ' seats--solo'}`}>
+    ${coop ? html`<${CapacityPicker} room=${room} facts=${facts} busy=${busy} connected=${online} onPick=${setCapacity} onMatchmaking=${setMatchmaking} />` : null}
+    <main class=${`seats${coop ? facts.seats.length > 10 ? ' seats--dense' : facts.seats.length > 4 ? ' seats--expanded' : '' : ' seats--solo'}${coop && facts.seats.length === 10 ? ' seats--ten' : ''}`}>
       ${facts.seats.map((s, i) => html`<${SeatCard} key=${s ? `p${s.playerId}` : `e${i}`} seat=${s} index=${i} room=${room} facts=${facts}
-        myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} />`)}
+        myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} onTransferHost=${transferHost} />`)}
       ${coop ? null : html`<aside class="solo-brief brackets">
         <${MicroLabel} tone="mint">BRIEFING<//>
         <h2>${DIFFICULTY_NAMES[room.difficulty] ? t(DIFFICULTY_NAMES[room.difficulty]) : ''}<span class="num t-dim"> ${info.code}</span></h2>
@@ -365,16 +425,16 @@ export function RoomScreen() {
         <span class="room-bar__label">${t('模拟难度')}<${MicroLabel}>DIFFICULTY<//></span>
         <div class="room-bar__opts">
           <${DifficultyPicker} room=${room} isHost=${facts.isHost} busy=${busy} onPick=${setDifficulty} />
-          <${AiLastToggle} option=${aiLastOption(room, me.playerId)} busy=${busy} onToggle=${setAiLast} />
+          <${AiLastRule} option=${aiLastOption(room)} />
         </div>
       </div>
       <div class="room-bar__center">
         <div class="ready-count" hidden=${!coop}>
           <span class="t-lo">${t('已就绪')}</span>
           <b class="num">${facts.readyHumans}</b><span class="num t-dim">/${facts.humans.length}</span>
-          <span class="ready-count__icons" aria-hidden="true">
+          ${facts.humans.length <= 8 ? html`<span class="ready-count__icons" aria-hidden="true">
             ${facts.humans.map((s) => html`<${Icon} key=${s.playerId} name="user" class=${facts.isReady(s) ? 'is-on' : ''} />`)}
-          </span>
+          </span>` : null}
         </div>
         <div class="room-bar__status">${statusLine}</div>
       </div>
