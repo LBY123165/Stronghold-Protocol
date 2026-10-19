@@ -65,3 +65,6 @@ desktop.ini
 .claude/
 # tools/sim-check.mjs: the corpus and its Node traces for /dev/sim-check.html
 public/dev/simcheck/data/
+
+# generated skin plugins (game art never enters git; tools/skins-plugin.mjs rebuilds them)
+plugins/stronghold-skins*/
