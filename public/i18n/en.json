@@ -2205,5 +2205,17 @@
   "已就绪 · 等待房主开始模拟": "Ready · waiting for the host to start",
   "准备就绪后，房主即可开始模拟": "The host can start once everyone is ready",
   "投票通过：本轮结束后跳过后续全部联防，按剩余漏怪结算": "Vote passed: after this round every later unite round is skipped and the remaining leaks settle as they stand",
-  "{n} 人": "{n} players"
+  "{n} 人": "{n} players",
+  "还没有选择任何外观，先挑一套再导出": "No appearance chosen yet — pick one before exporting",
+  "已导出 {n} 套外观": "Exported {n} appearance(s)",
+  "无法读取该文件": "Could not read that file",
+  "这个文件里的外观在本机都不可用": "None of the appearances in that file are available here",
+  "已导入 {n} 套外观": "Imported {n} appearance(s)",
+  "已导入 {n} 套外观，跳过 {k} 套（本机没有）": "Imported {n} appearance(s), skipped {k} not installed here",
+  "导出皮肤选择为文件（可在别的设备上导入）": "Export the skin selection to a file (import it on another device)",
+  "从文件导入皮肤选择": "Import a skin selection from a file",
+  "这不是有效的 JSON 文件": "That is not a valid JSON file",
+  "这不是皮肤选择的数据": "That is not a skin-selection file",
+  "这个文件来自更新的版本，请先升级": "That file comes from a newer version — update first",
+  "这个文件里没有皮肤选择": "That file holds no skin selection"
 }

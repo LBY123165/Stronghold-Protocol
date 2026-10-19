@@ -707,3 +707,6 @@
   .lo-skin__art--face > .lo-skin__art--big { display: none; }
   .lo-skin__art--face > .lo-skin__art--faceimg { display: block; }
 }
+/* 皮肤区标题右侧的 导出 / 导入（照干员调配的 ghost 小按钮） */
+.lo-sec__tools { display: flex; align-items: center; gap: max(.04rem, 4px); margin-left: auto; }
+.lo-sec__file { display: none; }

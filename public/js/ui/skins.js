@@ -25,6 +25,7 @@
 import { createStore, loadPref, savePref } from '../store.js';
 import { data } from '../data.js';
 import { SKIN_LIMITS } from '../../../shared/protocol.js';
+import { N_ } from '../../../shared/i18n.js';
 
 /** The localStorage preference (`sp.pref.<key>`) of this browser's skin choices: `{ [charId]: skinId }`. */
 export const SKINS_PREF = 'skins';
@@ -242,4 +243,63 @@ export function chosenSkin(charId, entries = null) {
 /** The files the picker reads: the composed manifest (the skins, and the 默认 tile's own art). */
 export function loadSkinData() {
   data.load('assets').catch(() => {});
+}
+
+// ---- 导出 / 导入 (the skin selection only; the loadout has its own stronghold.loadout file) ----------------
+//
+// The selection is per browser (localStorage + room.skins), so moving it between machines — or handing a friend a
+// ready-made set — needs a file. The shape mirrors ui/loadoutModel.js `serializeExport`: a `kind` that refuses another
+// file by name, a `version`, the app version it came from (informational only) and the data itself.
+
+export const SKINS_EXPORT_KIND = 'stronghold.skins';
+export const SKINS_EXPORT_VERSION = 1;
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/**
+ * The file text of a selection. `skins` is the store's own `{ [charId]: skinId }`, already bounded and sanitised by
+ * parseStoredSkins, so what is exported is exactly what this browser wears.
+ * @param {Record<string, string>} entries
+ * @param {{ app?: string|null, now?: Date }} [opts]
+ */
+export function serializeSkinsExport(entries, { app = null, now = new Date() } = {}) {
+  const skins = parseStoredSkins(entries);
+  return {
+    kind: SKINS_EXPORT_KIND,
+    version: SKINS_EXPORT_VERSION,
+    ...(app ? { app } : {}),
+    exportedAt: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`,
+    skins,
+  };
+}
+
+/**
+ * Read an exported selection, keeping the pairs this installation can actually wear.
+ *
+ * Unlike a stored selection, an imported one is only useful if the operator and the skin both resolve here, so
+ * `compose` (a `{ [charId]: Set<skinId> }` of what the composed manifest offers, or a predicate) drops the rest and
+ * the caller reports how many were skipped. A file from a newer version, another kind or garbage is refused with a
+ * message; unknown extra fields are ignored.
+ * @param {string|any} input file text or an already parsed object
+ * @param {{ offered?: ((charId: string, skinId: string) => boolean)|null, limit?: number }} [opts]
+ * @returns {{ ok: true, skins: Record<string, string>, skipped: number } | { ok: false, error: string }}
+ */
+export function parseSkinsImport(input, { offered = null, limit = SKIN_LIMITS.entries } = {}) {
+  let doc = input;
+  if (typeof input === 'string') {
+    try { doc = JSON.parse(input); } catch { return { ok: false, error: N_('这不是有效的 JSON 文件') }; }
+  }
+  if (!isObj(doc)) return { ok: false, error: N_('这不是皮肤选择的数据') };
+  if (doc.kind !== SKINS_EXPORT_KIND) return { ok: false, error: N_('这不是皮肤选择的数据') };
+  if (Number(doc.version) > SKINS_EXPORT_VERSION) return { ok: false, error: N_('这个文件来自更新的版本，请先升级') };
+  if (!isObj(doc.skins)) return { ok: false, error: N_('这个文件里没有皮肤选择') };
+  const skins = {};
+  let skipped = 0;
+  for (const [charId, skinId] of Object.entries(doc.skins)) {
+    const id = str(charId), skin = str(skinId);
+    if (!id || !skin || Object.keys(skins).length >= limit) { skipped++; continue; }
+    if (offered && !offered(id, skin)) { skipped++; continue; }
+    skins[id] = skin;
+  }
+  return { ok: true, skins, skipped };
 }

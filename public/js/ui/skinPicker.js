@@ -20,14 +20,31 @@
 // A missing piece of art still falls back to the OPERATOR's own (its 立绘 / portrait / avatar), never to a slash or a
 // placeholder, so the 默认 tile of a picture-only plugin draws the picture that plugin wrote.
 
-import { useState } from '../../vendor/hooks.module.js';
-import { html, MicroLabel, Modal } from './components.js';
+import { useRef, useState } from '../../vendor/hooks.module.js';
+import { html, Button, MicroLabel, Modal } from './components.js';
+import { toast } from './toasts.js';
 import { useStore } from '../store.js';
 import { useData } from '../data.js';
-import { skinsStore, availableSkins, chosenSkin, hasAnySkinChoices, setSkin, clearSkin, SKINS_KEY } from './skins.js';
+import { skinsStore, availableSkins, chosenSkin, hasAnySkinChoices, setSkin, clearSkin, setSkins, serializeSkinsExport,
+  parseSkinsImport, SKINS_KEY, SKINS_EXPORT_KIND } from './skins.js';
 import { t } from '../../../shared/i18n.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
+
+/** Save a JSON file from the browser (no server round trip: the selection lives in this browser). */
+function downloadText(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const skinsFilename = (now = new Date()) =>
+  `stronghold-skins-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}.json`;
 
 /**
  * One tile of the grid: the 默认 appearance of the operator (which has real art of its own) or one of its skins.
@@ -95,6 +112,7 @@ export function SkinSection({ charId }) {
   const s = useStore((v) => v, Object.is, skinsStore);
   const ready = useData('assets');
   const [preview, setPreview] = useState(null);
+  const fileRef = useRef(null);
 
   const id = typeof charId === 'string' && charId ? charId : null;
   if (!id || !ready) return null;
@@ -113,6 +131,32 @@ export function SkinSection({ charId }) {
   const previewRow = preview ? rows.find((x) => !x.own && x.id === preview) || null : null;
   const previewArt = previewRow ? (previewRow.illust || previewRow.portrait || previewRow.avatar) : null;
 
+  // 导出 / 导入 (the selection lives in this browser, so a file is the only way to move it). An imported pair is kept
+  // only when this installation can actually wear it: `availableSkins` is the composed manifest, i.e. what the picker
+  // offers, so a file made on a machine with a bigger skin set imports the part that exists here.
+  const mine = s[SKINS_KEY] || {};
+  const exportSkins = () => {
+    const count = Object.keys(mine).length;
+    if (!count) { toast(t('还没有选择任何外观，先挑一套再导出'), 'warn'); return; }
+    downloadText(skinsFilename(), JSON.stringify(serializeSkinsExport(mine), null, 2));
+    toast(t('已导出 {n} 套外观', { n: count }));
+  };
+  const importSkins = async (file) => {
+    if (!file) return;
+    let text = '';
+    try { text = await file.text(); } catch { toast(t('无法读取该文件'), 'warn'); return; }
+    const res = parseSkinsImport(text, {
+      offered: (charId, skinId) => availableSkins(charId).some((x) => !x.own && x.playable && x.id === skinId),
+    });
+    if (!res.ok) { toast(t(res.error), 'warn'); return; }
+    const incoming = Object.keys(res.skins).length;
+    if (!incoming) { toast(t('这个文件里的外观在本机都不可用'), 'warn'); return; }
+    setSkins({ ...mine, ...res.skins });
+    toast(res.skipped
+      ? t('已导入 {n} 套外观，跳过 {k} 套（本机没有）', { n: incoming, k: res.skipped })
+      : t('已导入 {n} 套外观', { n: incoming }));
+  };
+
   return html`<section class="lo-sec lo-sec--skin" data-testid="skin-section">
     <header class="lo-sec__head">
       <h3>${t('皮肤')}<${MicroLabel}>SKIN<//></h3>
@@ -120,6 +164,14 @@ export function SkinSection({ charId }) {
             this section with the 默认 tile alone, and the count is what says the plugin is on and this operator simply
             has no 时装 — omitting it would leave the header looking like an empty section. One branch fewer, too. */ null}
       <span class="lo-sec__note">${t('{n} 套外观', { n: shown.length - 1 })}</span>
+      <span class="lo-sec__tools">
+        <${Button} variant="ghost" size="sm" data-testid="skins-export" disabled=${!Object.keys(mine).length}
+          title=${t('导出皮肤选择为文件（可在别的设备上导入）')} onClick=${exportSkins}>${t('导出')}<//>
+        <${Button} variant="ghost" size="sm" data-testid="skins-import"
+          title=${t('从文件导入皮肤选择')} onClick=${() => fileRef.current && fileRef.current.click()}>${t('导入')}<//>
+        <input ref=${fileRef} type="file" accept="application/json,.json" class="lo-sec__file"
+          onChange=${(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; importSkins(f); }} />
+      </span>
     </header>
     <div class="lo-skins" role="radiogroup" aria-label=${t('选择皮肤')}>
       ${shown.map((row) => html`<${SkinTile} key=${row.own ? 'default' : row.id} row=${row} chosen=${row.own ? !chosen : chosen === row.id}
