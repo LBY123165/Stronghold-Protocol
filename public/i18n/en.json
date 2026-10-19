@@ -2204,5 +2204,6 @@
   "你是同盟的房主，离开后房主身份将移交或同盟解散。确定离开吗？": "You host this alliance; leaving hands the host role over or disbands it. Leave?",
   "已就绪 · 等待房主开始模拟": "Ready · waiting for the host to start",
   "准备就绪后，房主即可开始模拟": "The host can start once everyone is ready",
-  "投票通过：本轮结束后跳过后续全部联防，按剩余漏怪结算": "Vote passed: after this round every later unite round is skipped and the remaining leaks settle as they stand"
+  "投票通过：本轮结束后跳过后续全部联防，按剩余漏怪结算": "Vote passed: after this round every later unite round is skipped and the remaining leaks settle as they stand",
+  "{n} 人": "{n} players"
 }

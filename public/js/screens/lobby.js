@@ -399,10 +399,12 @@ export function LobbyScreen() {
         <div class="diff-list">
           ${DIFFICULTIES.map((d) => html`<${DifficultyCard} key=${d} roomMode=${roomMode} difficulty=${d} selected=${difficulty === d} onSelect=${pickDifficulty} />`)}
         </div>
-        ${roomMode === 'coop' ? html`<div class="section-label"><span class="section-label__idx num">02B</span>${t('同盟席位')}<${MicroLabel}>ROOM CAPACITY<//></div>
-        <div class="join-row" role="radiogroup" aria-label=${t('同盟席位')}>
-          ${ROOM_CAPACITIES.map((n) => html`<${Button} key=${n} size="sm" variant=${capacity === n ? 'amber' : 'secondary'}
-            aria-checked=${capacity === n ? 'true' : 'false'} onClick=${() => pickCapacity(n)}>${n}<//>`)}
+        ${roomMode === 'coop' ? html`<div class="capacity-select">
+          <div class="capacity-select__label">${t('同盟席位')} <${MicroLabel}>ROOM CAPACITY<//></div>
+          <div class="capacity-select__options" role="radiogroup" aria-label=${t('同盟席位')}>
+            ${ROOM_CAPACITIES.map((n) => html`<button key=${n} type="button" role="radio" aria-checked=${capacity === n ? 'true' : 'false'}
+              class=${`capacity-select__opt${capacity === n ? ' is-active' : ''}`} onClick=${() => pickCapacity(n)}>${t('{n} 人', { n })}</button>`)}
+          </div>
         </div>` : null}
         <div class="create-box">
           ${testMode ? html`<label class="create-box__test" data-testid="create-test">
