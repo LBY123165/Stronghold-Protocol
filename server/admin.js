@@ -11,12 +11,17 @@
 //     console exactly when the server is protecting itself.
 //   * Read-only where the repository already decided: serverSettings.js states that per-server settings have no HTTP
 //     administration endpoint — the panel DISPLAYS them and the CLI (tools/server-settings.mjs) writes them.
+//   * Announcements are the one writable document store: publish / pin / unpin / notify go through the SAME
+//     AnnouncementStore the CLI (tools/announcements.mjs) uses, so the index stays hash-verified and a publication stays
+//     immutable. Notice delivery reuses enqueueAnnouncementNotice (the on-disk spool the running server polls) rather
+//     than a second send path, which is why a notice reaches players within ~1s without any restart.
 //
 // i18n-ignore-file: operator-facing administration API and logs, never player-facing UI text
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import { APP_VERSION, PROTOCOL_VERSION } from '../shared/constants.js';
+import { enqueueAnnouncementNotice } from './announcementNotices.js';
 import { send } from './net.js';
 
 /** API prefix; anything under it is answered by server/http/admin.js. */
@@ -35,6 +40,12 @@ export const ADMIN_LOGIN_MAX_FAILURES = 8;
 export const ADMIN_LOGIN_WINDOW_MS = 5 * 60 * 1000;
 export const ADMIN_BROADCAST_TEXT_MAX = 300;
 export const ADMIN_BODY_MAX_BYTES = 8 * 1024;
+/**
+ * The body cap for the announcement endpoints only: a notice is a Markdown document, not a toast. The generic cap stays
+ * 8 KB so no other write endpoint can be used as a write amplifier; this one is bounded by the store's own
+ * ANNOUNCEMENT_MAX_BODY_BYTES instead.
+ */
+export const ADMIN_ANNOUNCEMENT_BODY_MAX_BYTES = 96 * 1024;
 
 /**
  * The configured secret: `ADMIN_SECRET`, else the contents of `ADMIN_SECRET_FILE` (systemd LoadCredential, a Docker
@@ -139,7 +150,7 @@ export function createAdminService(deps) {
   const {
     enabled, problem = '', secretSource = null, secret = null,
     lobby, network, registry, bandwidthEmergency = null, assetCache = null,
-    serverSettings = null, announcements = null,
+    serverSettings = null, announcements = null, accounts = null,
     ring, log = console, startedAt = Date.now(), now = Date.now, build = () => '',
   } = deps;
   const sessionToken = enabled ? newSessionToken() : '';
@@ -273,7 +284,10 @@ export function createAdminService(deps) {
       assetCache: assetCache ? { required: !!(lobby?.requireAssetCache), limits: lobby?.assetCacheLimits ?? null,
         summary: safe(() => assetCache.currentSummary?.() ?? assetCache.summary?.() ?? null) } : null,
       settings: serverSettings ? safe(() => serverSettings.get?.() ?? null) : null,
-      announcements: announcements ? safe(() => (announcements.list?.() || []).length) : null,
+      // list() returns { revision, pinnedId, items }, NOT an array — `.length` on it was always undefined.
+      announcements: announcementsAvailable()
+        ? safe(() => { const l = announcements.list(); return { count: (l.items || []).length, pinnedId: l.pinnedId || null }; })
+        : null,
       logs: { buffered: ring.size, lastSeq: ring.lastSeq },
     };
   }
@@ -335,10 +349,130 @@ export function createAdminService(deps) {
     return { ok: true, code: room.code };
   }
 
+  // ---- accounts (the operator's account console) ----------------------------------------------------
+  //
+  // The account store is optional: a deployment without accounts (or with the store failing to load) answers
+  // UNAVAILABLE instead of pretending the console is empty.
+
+  const accountsAvailable = () => !!accounts && typeof accounts.list === 'function';
+
+  /** The accounts, optionally filtered by a name fragment. */
+  async function listAccounts(query = '') {
+    if (!accountsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = await accounts.list({ query });
+    return { ok: true, ...result, at: now() };
+  }
+
+  /** Set a new password for one account; its tokens are dropped, so every device logs in again. */
+  async function resetAccountPassword(username, password) {
+    if (!accountsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = await accounts.setPassword(username, password);
+    if (result.ok) log.info?.(`[admin] 重置了账号 ${result.account.username} 的密码`);
+    return result;
+  }
+
+  /** Ban or unban an account. */
+  async function setAccountBanned(username, banned, reason = '') {
+    if (!accountsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = await accounts.setBanned(username, { banned, reason });
+    if (result.ok) log.info?.(`[admin] ${banned ? '封禁' : '解封'}了账号 ${result.account.username}`);
+    return result;
+  }
+
+  /** Delete an account for good. */
+  async function deleteAccount(username) {
+    if (!accountsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = await accounts.remove(username);
+    if (result.ok) log.info?.(`[admin] 删除了账号 ${result.username}`);
+    return result;
+  }
+
+  // ---- announcements (the operator's公告 console) ------------------------------------------------------
+  //
+  // Every write goes through the shared AnnouncementStore, not a parallel path: the CLI (tools/announcements.mjs) and
+  // this console then produce the same hash-verified index, and a publication stays immutable (a new id, never an
+  // overwrite). Failures are returned as `error` text, never thrown: an operator's typo must not take the server down.
+
+  const announcementsAvailable = () => !!announcements && typeof announcements.list === 'function';
+
+  /** The announcement catalog plus the current pinned id. */
+  function listAnnouncements() {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = safe(() => announcements.list());
+    if (result?.error) return { ok: false, error: result.error };
+    const items = (result?.items || []).map((item) => ({
+      ...item,
+      pinned: item.id === result.pinnedId,
+    }));
+    return { ok: true, revision: result.revision || '', pinnedId: result.pinnedId || null, items, at: now() };
+  }
+
+  /** One announcement's verified Markdown body, or null for an unknown/unreadable id. */
+  function readAnnouncement(id) {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const item = safe(() => announcements.read(String(id || '')));
+    if (!item || item.error) return { ok: false, error: item?.error || 'NOT_FOUND' };
+    return { ok: true, item };
+  }
+
+  /**
+   * Publish a new announcement. `id` may be omitted (the store generates one); `pin` also makes it the sole pinned one.
+   * @param {{ id?: string, title?: string, markdown?: string, pin?: boolean }} input
+   */
+  function publishAnnouncement(input) {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = safe(() => announcements.publish({
+      id: input.id === undefined || input.id === '' ? undefined : String(input.id),
+      title: String(input.title ?? ''),
+      markdown: String(input.markdown ?? ''),
+      pin: input.pin === true,
+    }));
+    if (result?.error) return { ok: false, error: result.error };
+    log.info?.(`[admin] 发布公告 ${result.id}${input.pin === true ? '（并置顶）' : ''}：${result.title}`);
+    return { ok: true, item: result };
+  }
+
+  /** Make one announcement the pinned one (the store keeps at most one). */
+  function pinAnnouncement(id) {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = safe(() => announcements.pin(String(id || '')));
+    if (result?.error) return { ok: false, error: result.error };
+    log.info?.(`[admin] 置顶公告 ${id}`);
+    return { ok: true };
+  }
+
+  /** Drop the pinned announcement; the catalog is untouched. */
+  function unpinAnnouncement() {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const result = safe(() => announcements.unpin());
+    if (result?.error) return { ok: false, error: result.error };
+    log.info?.('[admin] 取消公告置顶');
+    return { ok: true };
+  }
+
+  /**
+   * Notify currently connected players about an ALREADY published announcement. Delivery is the spool the running
+   * server polls (~1s), so success means "written", not "delivered" — the operator's console says the same.
+   * @param {string} id
+   */
+  async function notifyAnnouncement(id) {
+    if (!announcementsAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const clean = String(id || '').trim();
+    if (!clean) return { ok: false, error: 'EMPTY_ID' };
+    let command;
+    try { command = await enqueueAnnouncementNotice({ store: announcements, id: clean, log }); }
+    catch (error) { return { ok: false, error: String(error?.message || error) }; }
+    log.info?.(`[admin] 提交公告通知 ${clean}`);
+    return { ok: true, msgid: command.msgid };
+  }
+
   return {
     enabled, problem, secretSource,
     authenticate, login, loggedOut,
     overview, rooms, closeRoom, broadcast, setMaintenance, maintenanceAvailable,
+    accountsAvailable, listAccounts, resetAccountPassword, setAccountBanned, deleteAccount,
+    announcementsAvailable, listAnnouncements, readAnnouncement,
+    publishAnnouncement, pinAnnouncement, unpinAnnouncement, notifyAnnouncement,
     /** @param {number} since @param {number} limit */
     logs: (since, limit) => ({ ...ring.list(since, limit), at: now() }),
     /** Diagnostics for the boot line; never includes the secret. */

@@ -118,6 +118,65 @@
       <p id="rooms-empty" class="dim">当前没有房间。</p>
     </section>
 
+    <!-- 公告 -->
+    <section class="panel">
+      <h2>公告 <span id="ann-count" class="badge badge--dim">0</span>
+        <span id="ann-pinned" class="badge badge--dim" hidden>已置顶</span>
+      </h2>
+      <p class="dim">发布即刻生效，玩家进站自动看到；已发布的公告不可修改，改正文请用新 ID 重发。</p>
+
+      <details class="subpanel">
+        <summary>发布新公告</summary>
+        <div class="ann-form">
+          <label>ID（留空自动生成；只能用小写字母、数字、下划线、连字符）
+            <input id="ann-id" type="text" maxlength="64" placeholder="welcome" />
+          </label>
+          <label>标题（最多 120 字）
+            <input id="ann-title" type="text" maxlength="120" placeholder="开服公告" />
+          </label>
+          <label>正文（Markdown，最多 50000 字）
+            <textarea id="ann-body" rows="8" placeholder="## 服务器维护通知&#10;&#10;今晚 02:00–04:00 维护，请提前下线。"></textarea>
+          </label>
+          <div class="row">
+            <label class="chk"><input type="checkbox" id="ann-pin" /> 同时置顶（会取消其他置顶）</label>
+            <button id="btn-ann-publish" class="btn btn--primary">发布</button>
+            <button id="btn-ann-clear" class="btn btn--ghost">清空表单</button>
+          </div>
+          <p id="ann-msg" class="dim"></p>
+        </div>
+      </details>
+
+      <div class="tablewrap">
+        <table id="announcements">
+          <thead>
+            <tr><th>ID</th><th>标题</th><th>发布时间</th><th>状态</th><th></th></tr>
+          </thead>
+          <tbody id="ann-body-list"></tbody>
+        </table>
+      </div>
+      <p id="ann-empty" class="dim">还没有发布过公告。</p>
+    </section>
+
+    <!-- 账号 -->
+    <section class="panel">
+      <h2>账号 <span id="accounts-count" class="badge badge--dim">0</span></h2>
+      <div class="row">
+        <input id="acct-query" type="search" maxlength="64" placeholder="按用户名搜索（留空列出全部）" />
+        <button id="btn-acct-refresh" class="btn btn--ghost">刷新</button>
+      </div>
+      <div class="tablewrap">
+        <table id="accounts">
+          <thead>
+            <tr>
+              <th>用户名</th><th>注册于</th><th>皮肤</th><th>登录设备</th><th>状态</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="accounts-body"></tbody>
+        </table>
+      </div>
+      <p id="accounts-empty" class="dim">没有匹配的账号。</p>
+    </section>
+
     <!-- 只读信息 -->
     <section class="grid">
       <article class="card">
@@ -140,8 +199,8 @@
     </section>
 
     <footer class="foot dim">
-      只读监控 + 三个显式动作（广播 / 维护模式 / 关闭房间）。服务器设置由 CLI 写入，见
-      <code>docs/ADMIN.md</code>。
+      只读监控 + 运维动作（广播 / 维护模式 / 关闭房间）+ 公告管理（发布 / 置顶 / 通知）+ 账号管理（重置密码 / 封禁 / 删除）。
+      服务器设置由 CLI 写入，见 <code>docs/ADMIN.md</code>。
     </footer>
   </main>
 

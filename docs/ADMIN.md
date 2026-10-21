@@ -61,8 +61,32 @@ sudo systemctl restart stronghold
 | POST | `/api/admin/broadcast` | `{ text, kind }` → 给**每个在线连接**推一条提示（`kind`: `info`/`success`/`warn`/`error`），同时进顶部滚动条。text 上限 300 字（超长截断，不报错），空白返回 400 |
 | POST | `/api/admin/maintenance` | `{ on: true|false }` → 维护模式开关。**响应先发、开关后生效**（见下） |
 | POST | `/api/admin/rooms/close` | `{ code }` → 关掉一个房间，里面的人收到 `room.closed{reason:"admin"}` 回到大厅；房间不存在返回 404 |
+| GET | `/api/admin/accounts?q=` | 账号列表（`q` 按用户名片段过滤，大小写不敏感）：用户名、注册时间、皮肤数、登录设备数、是否封禁。**绝不返回密码哈希、salt 或 token** |
+| POST | `/api/admin/accounts/password` | `{ username, password }` → 重置密码。密码至少 8 位；**该账号的所有登录设备被登出**（token 清空） |
+| POST | `/api/admin/accounts/ban` | `{ username, banned, reason? }` → 封禁/解封。封禁后该账号无法登录，已登录的设备被登出，**账号数据保留**，可随时解封 |
+| POST | `/api/admin/accounts/delete` | `{ username }` → 永久删除账号（密码、皮肤、token 全清），**用户名被释放**，可重新注册 |
+| GET | `/api/admin/announcements` | 公告目录：`revision`、`pinnedId`、`items[{id,title,publishedAt,revision,bytes,pinned}]`（仅元数据，不含正文） |
+| GET | `/api/admin/announcements?id=` | 单条公告的**已校验正文**（`markdown`）+ 元数据；ID 未知/正文不可读返回 404 |
+| POST | `/api/admin/announcements/publish` | `{ id?, title, markdown, pin? }` → 发布新公告。`id` 省略则自动生成（`ann-<时间36进制>-<uuid前缀>`）；**同 ID 不可重发**（改正文请换新 ID）。正文上限 128 KiB |
+| POST | `/api/admin/announcements/pin` | `{ id }` → 设为唯一置顶公告（自动取消原置顶）；ID 不存在返回 400 |
+| POST | `/api/admin/announcements/unpin` | `{}` → 取消置顶，目录不变 |
+| POST | `/api/admin/announcements/notify` | `{ id }` → 向**当前在线玩家**弹该公告（含正在对局中的）。只能指定已发布的公告；成功仅代表**已写入命令槽**，约 1 秒内由运行中的服务器投递 |
 
-错误码：`400 BAD_BODY`、`401 UNAUTHORIZED`/`BAD_SECRET`、`404 NOT_FOUND`（未知端点或房间不存在）、`405 METHOD_NOT_ALLOWED`（已知端点用了错方法）、`413 BODY_TOO_LARGE`（> 8 KB）、`429 TOO_MANY_ATTEMPTS`、`503 UNAVAILABLE`（本部署没有带宽控制，无法维护模式）。
+错误码：`400 BAD_BODY`、`401 UNAUTHORIZED`/`BAD_SECRET`、`404 NOT_FOUND`（未知端点或房间不存在）、`405 METHOD_NOT_ALLOWED`（已知端点用了错方法）、`413 BODY_TOO_LARGE`（> 8 KB；公告发布端点放宽到 96 KB）、`429 TOO_MANY_ATTEMPTS`、`503 UNAVAILABLE`（本部署没有带宽控制，无法维护模式；或本部署没有启用账号/公告功能）。
+
+## 4.1 账号管理
+
+控制台的「账号」区块列出所有账号，支持按用户名搜索，提供三个操作：
+
+| 操作 | 行为 | 注意 |
+|---|---|---|
+| **重置密码** | 设置新密码 | 该账号的所有设备必须重新登录（旧 token 全部失效） |
+| **封禁 / 解封** | 封禁后无法登录 | 数据保留，随时可解封；封禁会登出该账号的所有设备 |
+| **删除** | 永久删除 | 不可恢复，用户名被释放 |
+
+删除需要再输一次用户名确认。账号名规则与玩家端一致（3–24 个字符，含至少一个字母或数字，见 `shared/account.js`）。
+
+账号功能是**可选**的：服务器没有启用账号（`createAccountStore` 未装配）时，这些端点返回 `503 UNAVAILABLE`，控制台的账号区块显示「这台服务器没有启用账号功能」。
 
 ## 5. 维护模式到底做了什么
 
@@ -114,6 +138,7 @@ curl -s -H "Authorization: Bearer $SECRET" -H 'content-type: application/json' -
 - **不能改服务器设置**：只读展示，写入在 CLI（见 §1 第 2 条）。
 - **不能踢单个玩家**：只能关整个房间（`rooms/close`）。房主自己可以在游戏里踢人。
 - **不改房间容量/difficulty**：这些是房主的权力，后台不越权。
+- **不能看账号的密码或 token**：只有重置，没有查看；控制台也从不返回哈希、salt 或 token。
 - **没有审计日志文件**：动作会写进服务端日志（`journalctl -u stronghold`），但不会单独落盘。
 - 需要这些的话，扩展点在 `server/admin.js`（服务）+ `server/http/admin.js`（路由）+ `public/admin/admin.js`（面板），三层都很小。
 

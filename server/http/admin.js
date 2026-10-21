@@ -10,12 +10,18 @@
 //   POST /api/admin/maintenance { on } → the server's own protection on/off (refuses new visits, freezes matches)
 //   POST /api/admin/rooms/close { code } → close one room
 //
+//   GET  /api/admin/announcements      → the catalog (metadata + pinned id)
+//   GET  /api/admin/announcements?id=   → one announcement's verified Markdown
+//   POST /api/admin/announcements/publish { id?, title, markdown, pin } → publish a new one
+//   POST /api/admin/announcements/pin { id } · /unpin {} → the sole pinned announcement
+//   POST /api/admin/announcements/notify { id } → notify connected players about a published one
+//
 // With no ADMIN_SECRET the whole prefix answers 404: a deployment that forgot the secret has no console at all (there is
 // deliberately no default password). Unauthenticated API calls answer 401; the console shell itself is public, it only
 // ever draws a登录 form until the API answers.
 //
 // i18n-ignore-file: operator-facing administration API and logs, never player-facing UI text
-import { ADMIN_API_PREFIX, ADMIN_BODY_MAX_BYTES, ADMIN_UI_PATH } from '../admin.js';
+import { ADMIN_ANNOUNCEMENT_BODY_MAX_BYTES, ADMIN_API_PREFIX, ADMIN_BODY_MAX_BYTES, ADMIN_UI_PATH } from '../admin.js';
 import { sendError, sendJson } from './common.js';
 
 /**
@@ -24,10 +30,10 @@ import { sendError, sendJson } from './common.js';
  * On overflow this stops reading and resolves `undefined` WITHOUT touching the socket: the caller answers 413 and only
  * then drops the request (`res.once('finish', …)` below). Destroying the request here would kill the connection before
  * the answer is flushed, and the operator would see a network error instead of the status.
- * @param {any} req
+ * @param {any} req @param {number} [limit]
  * @returns {Promise<object|null|undefined>}
  */
-function readJsonBody(req) {
+function readJsonBody(req, limit = ADMIN_BODY_MAX_BYTES) {
   return new Promise((resolve) => {
     let size = 0;
     let over = false;
@@ -35,7 +41,7 @@ function readJsonBody(req) {
     req.on('data', (chunk) => {
       if (over) return;
       size += chunk.length;
-      if (size > ADMIN_BODY_MAX_BYTES) { over = true; chunks = []; req.pause(); resolve(undefined); return; }
+      if (size > limit) { over = true; chunks = []; req.pause(); resolve(undefined); return; }
       chunks.push(chunk);
     });
     req.on('end', () => {
@@ -58,6 +64,12 @@ const wantJson = (req) => {
 /** The leaf names below /api/admin. Anything else is 404; a known leaf with the wrong method is 405. */
 const READ_ENDPOINTS = new Set(['/overview', '/rooms', '/logs']);
 const WRITE_ENDPOINTS = new Set(['/broadcast', '/maintenance', '/rooms/close']);
+/** The account console's write endpoints (the list is read by GET /api/admin/accounts). */
+const ACCOUNT_WRITE_ENDPOINTS = new Set(['/accounts/password', '/accounts/ban', '/accounts/delete']);
+/** The announcement console's write endpoints (the catalog is read by GET /api/admin/announcements). */
+const ANNOUNCEMENT_WRITE_ENDPOINTS = new Set([
+  '/announcements/publish', '/announcements/pin', '/announcements/unpin', '/announcements/notify',
+]);
 
 /**
  * @param {{ admin: any, serveStatic: (req: any, res: any, rawPath: string, query: string) => Promise<void>,
@@ -130,6 +142,80 @@ export function createAdminHandler({ admin, serveStatic, log = console }) {
 
     // Dispatch by the leaf below /api/admin, so an UNKNOWN path is 404 while a KNOWN path with the wrong method is 405.
     const leaf = path.slice(ADMIN_API_PREFIX.length);
+
+    // ---- the account console: its own leaves, so the operator's account work never shares the room endpoints ----
+    if (leaf === '/accounts' || ACCOUNT_WRITE_ENDPOINTS.has(leaf)) {
+      if (leaf === '/accounts') {
+        if (method !== 'GET') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+        if (!admin.accountsAvailable?.()) { json(req, res, 503, { ok: false, error: 'UNAVAILABLE' }); return true; }
+        const q = new URLSearchParams(parts.query);
+        const result = await admin.listAccounts(q.get('q') || '');
+        json(req, res, result.ok ? 200 : 503, result);
+        return true;
+      }
+      if (method !== 'POST') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+      const body = await readJsonBody(req);
+      if (body === undefined) { json(req, res, 413, { ok: false, error: 'BODY_TOO_LARGE' }); res.once('finish', () => req.destroy()); return true; }
+      if (!body) { json(req, res, 400, { ok: false, error: 'BAD_BODY' }); return true; }
+      const username = typeof body.username === 'string' ? body.username.trim() : '';
+      if (!username) { json(req, res, 400, { ok: false, error: 'BAD_BODY' }); return true; }
+      if (leaf === '/accounts/password') {
+        const result = await admin.resetAccountPassword(username, typeof body.password === 'string' ? body.password : '');
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      if (leaf === '/accounts/ban') {
+        const result = await admin.setAccountBanned(username, body.banned !== false, typeof body.reason === 'string' ? body.reason : '');
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      const result = await admin.deleteAccount(username);
+      json(req, res, result.ok ? 200 : 404, result);
+      return true;
+    }
+
+    // ---- the announcement console: its own leaves, so publishing never shares the room endpoints ----
+    if (leaf === '/announcements' || ANNOUNCEMENT_WRITE_ENDPOINTS.has(leaf)) {
+      if (!admin.announcementsAvailable?.()) { json(req, res, 503, { ok: false, error: 'UNAVAILABLE' }); return true; }
+
+      if (leaf === '/announcements') {
+        if (method !== 'GET') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+        const q = new URLSearchParams(parts.query);
+        const id = q.get('id');
+        const result = id ? admin.readAnnouncement(id) : admin.listAnnouncements();
+        json(req, res, result.ok ? 200 : 404, result);
+        return true;
+      }
+
+      if (method !== 'POST') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+      // Publishing carries a Markdown document, so this leaf gets the wider cap; the others keep the generic one.
+      const limit = leaf === '/announcements/publish' ? ADMIN_ANNOUNCEMENT_BODY_MAX_BYTES : ADMIN_BODY_MAX_BYTES;
+      const body = await readJsonBody(req, limit);
+      if (body === undefined) { json(req, res, 413, { ok: false, error: 'BODY_TOO_LARGE' }); res.once('finish', () => req.destroy()); return true; }
+      if (!body) { json(req, res, 400, { ok: false, error: 'BAD_BODY' }); return true; }
+
+      if (leaf === '/announcements/publish') {
+        const result = admin.publishAnnouncement({
+          id: typeof body.id === 'string' ? body.id.trim() : undefined,
+          title: body.title, markdown: body.markdown, pin: body.pin === true,
+        });
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      if (leaf === '/announcements/pin') {
+        const result = admin.pinAnnouncement(body.id);
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      if (leaf === '/announcements/unpin') {
+        const result = admin.unpinAnnouncement();
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      const result = await admin.notifyAnnouncement(body.id);
+      json(req, res, result.ok ? 200 : 400, result);
+      return true;
+    }
 
     if (READ_ENDPOINTS.has(leaf)) {
       if (method !== 'GET') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }

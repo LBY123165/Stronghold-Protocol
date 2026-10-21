@@ -51,7 +51,7 @@ export function createAccountStore({ file, log = console } = {}) {
       if (accounts.has(key)) return { error: 'NAME_TAKEN' };
       const salt = randomBytes(16);
       const digest = await scrypt(password, salt, 64);
-      const rec = { username, salt: salt.toString('hex'), passwordHash: digest.toString('hex'), skins: {}, tokens: [] };
+      const rec = { username, salt: salt.toString('hex'), passwordHash: digest.toString('hex'), skins: {}, tokens: [], createdAt: Date.now() };
       const token = issueToken(rec);
       accounts.set(key, rec);
       try { await persist(); } catch (e) { accounts.delete(key); throw e; }
@@ -70,6 +70,8 @@ export function createAccountStore({ file, log = console } = {}) {
     const actual = Buffer.from(await scrypt(typeof password === 'string' ? password.slice(0, PASS_MAX) : '', salt, 64));
     const matches = timingSafeEqual(actual, expected);
     if (!rec || !validPassword(password) || !matches) return { error: 'BAD_CREDENTIALS' };
+    // a banned account keeps its data but cannot sign in (the operator may lift the ban)
+    if (rec.banned) return { error: 'BANNED' };
     const token = issueToken(rec);
     await persist();
     return { token, username: rec.username, skins: rec.skins || {} };
@@ -78,7 +80,10 @@ export function createAccountStore({ file, log = console } = {}) {
     await ready;
     if (typeof token !== 'string' || token.length > 128) return null;
     const digest = hash(token);
-    for (const [id, rec] of accounts) if ((rec.tokens || []).some((x) => x.hash === digest && x.at > Date.now() - 365 * 86400_000)) return { id, username: rec.username, skins: rec.skins || {} };
+    for (const [id, rec] of accounts) {
+      if (rec.banned) continue;
+      if ((rec.tokens || []).some((x) => x.hash === digest && x.at > Date.now() - 365 * 86400_000)) return { id, username: rec.username, skins: rec.skins || {} };
+    }
     return null;
   }
   async function setSkins(id, skins) {
@@ -89,5 +94,113 @@ export function createAccountStore({ file, log = console } = {}) {
     await persist();
     return true;
   }
-  return { ready, create, login, authenticate, setSkins };
+
+  // ---- operator-side account management (the 运维后台, docs/ADMIN.md) ----------------------------------
+  //
+  // The console never sees a password hash or a token: only the account's name, when it was created, how many
+  // tokens it holds and how many skins it owns. A banned account cannot log in and its tokens stop working.
+
+  /** The operator's view of one account. Never carries the hash, the salt or a token. */
+  function accountSummary(rec, id = null) {
+    return {
+      id: id ?? rec.id ?? null,
+      username: rec.username,
+      createdAt: rec.createdAt ?? null,
+      banned: rec.banned === true,
+      bannedAt: rec.bannedAt ?? null,
+      bannedReason: rec.bannedReason ?? null,
+      skinCount: Object.keys(rec.skins || {}).length,
+      tokenCount: (rec.tokens || []).length,
+    };
+  }
+
+  /**
+   * The accounts, newest first, optionally filtered by a substring of the name (case-insensitive).
+   * @param {{ query?: string, limit?: number }} [opts]
+   */
+  async function list({ query = '', limit = 200 } = {}) {
+    await ready;
+    const needle = String(query || '').trim().toLowerCase();
+    const max = Math.min(1000, Math.max(1, Number(limit) || 200));
+    const rows = [];
+    for (const [id, rec] of accounts) {
+      if (needle && !String(rec.username || '').toLowerCase().includes(needle)) continue;
+      rows.push(accountSummary(rec, id));
+    }
+    rows.sort((a, b) => String(a.username).localeCompare(String(b.username)));
+    return { accounts: rows.slice(0, max), total: rows.length };
+  }
+
+  /**
+   * Set a new password for an account and drop its tokens (every logged-in device has to log in again).
+   * @param {string} username
+   * @param {string} password
+   */
+  async function setPassword(username, password) {
+    const run = mutationQueue.then(async () => {
+      await ready;
+      const key = accountNameKey(username);
+      const rec = key ? accounts.get(key) : null;
+      if (!rec) return { ok: false, error: 'NO_SUCH_ACCOUNT' };
+      if (!validPassword(password)) return { ok: false, error: 'INVALID_PASSWORD' };
+      const salt = randomBytes(16);
+      const digest = await scrypt(password, salt, 64);
+      rec.salt = salt.toString('hex');
+      rec.passwordHash = digest.toString('hex');
+      rec.tokens = [];
+      rec.passwordChangedAt = Date.now();
+      try { await persist(); } catch (e) { log.error?.(`[accounts] cannot persist the new password: ${e.message}`); throw e; }
+      return { ok: true, account: accountSummary(rec, key) };
+    });
+    mutationQueue = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Ban (or unban) an account. A banned account cannot log in and its tokens are refused.
+   * @param {string} username
+   * @param {{ banned?: boolean, reason?: string }} [opts]
+   */
+  async function setBanned(username, { banned = true, reason = '' } = {}) {
+    const run = mutationQueue.then(async () => {
+      await ready;
+      const key = accountNameKey(username);
+      const rec = key ? accounts.get(key) : null;
+      if (!rec) return { ok: false, error: 'NO_SUCH_ACCOUNT' };
+      if (banned) {
+        rec.banned = true;
+        rec.bannedAt = Date.now();
+        rec.bannedReason = String(reason || '').slice(0, 200);
+        rec.tokens = [];
+      } else {
+        delete rec.banned;
+        delete rec.bannedAt;
+        delete rec.bannedReason;
+      }
+      try { await persist(); } catch (e) { log.error?.(`[accounts] cannot persist the ban: ${e.message}`); throw e; }
+      return { ok: true, account: accountSummary(rec, key) };
+    });
+    mutationQueue = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Delete an account and everything it owns. The name is freed for a new registration.
+   * @param {string} username
+   */
+  async function remove(username) {
+    const run = mutationQueue.then(async () => {
+      await ready;
+      const key = accountNameKey(username);
+      const rec = key ? accounts.get(key) : null;
+      if (!rec) return { ok: false, error: 'NO_SUCH_ACCOUNT' };
+      accounts.delete(key);
+      try { await persist(); } catch (e) { accounts.set(key, rec); throw e; }
+      return { ok: true, username: rec.username };
+    });
+    mutationQueue = run.catch(() => {});
+    return run;
+  }
+
+  return { ready, create, login, authenticate, setSkins, list, setPassword, setBanned, remove };
 }

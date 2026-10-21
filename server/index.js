@@ -216,7 +216,7 @@ export async function startServer(opts = {}) {
   });
   const adminService = createAdminService({
     enabled: !!adminSecret.secret, secret: adminSecret.secret, secretSource: adminSecret.source, problem: adminSecret.problem,
-    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements,
+    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts,
     ring: logRing, log, startedAt, build: buildTag,
   });
   const admin = createAdminHandler({ admin: adminService, serveStatic, log });
