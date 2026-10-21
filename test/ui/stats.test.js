@@ -459,8 +459,10 @@ describe('local stats: bounded storage', () => {
       })),
       bigUnknown: 'y'.repeat(1e6),
     });
-    assert.ok(JSON.stringify(rec).length < 40_000, `${JSON.stringify(rec).length} chars`);
-    assert.equal(rec.players.length, 6);
+    // this capacity branch: a record keeps every seat of the room (up to MAX_SEATS = 20), so the whole record is
+    // bounded by the room's size and the storage budget (MAX_CHARS = 800_000), not by the old six rows
+    assert.ok(JSON.stringify(rec).length < 200_000, `${JSON.stringify(rec).length} chars`);
+    assert.equal(rec.players.length, 20);
     assert.equal(rec.players[0].lineup.length, 12);
     assert.equal(rec.players[0].lineup[0].items.length, 4);
     assert.equal(rec.players[0].name.length, 24);

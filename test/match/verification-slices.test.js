@@ -4,6 +4,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { PHASE } from '../../shared/constants.js';
 import { runHeadless, validateClientResult, RESULT_GRACE_MS } from '../../server/match/fields.js';
 import { RealScheduler } from '../../server/match/scheduler.js';
+import { FreezeScheduler } from '../../server/match/freezeScheduler.js';
 import { compactResult, createBattleFromSpec, resultDigest } from '../../server/sim/spec.js';
 import { makeMatch } from './harness.js';
 
@@ -85,10 +86,12 @@ for (const verify of ['all', 'sample']) {
     const h = makeMatch({ mode: 'coop', humans: 1, bots: 0, seed: 345, clientCombat: true,
       clients: false, verify, headlessSliceMs: SLICE_MS, timerScale: 0 });
     const m = h.m;
-    // Install the real scheduler before start, while the harness has no queued timers.
-    const scheduler = new RealScheduler();
+    // Install the real scheduler before start, while the harness has no queued timers. Match always runs its timers
+    // through the emergency-freeze wrapper (Match.js), which adds gameNow() — wrap it the same way here.
+    const source = new RealScheduler();
+    const scheduler = new FreezeScheduler(source, { ownsSource: false });
     m.sched = scheduler;
-    t.after(() => { m.dispose(); scheduler.dispose(); });
+    t.after(() => { m.dispose(); scheduler.dispose(); source.dispose(); });
     const waitFor = async (predicate) => {
       const deadline = Date.now() + 10000;
       while (!predicate() && Date.now() < deadline) await pause(1);
