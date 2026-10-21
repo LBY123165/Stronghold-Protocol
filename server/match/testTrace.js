@@ -110,6 +110,10 @@ export function installTestTrace(m, opts) {
   m.sched = {
     virtual: scheduler.virtual, instant: scheduler.instant,
     now: () => eventNow ?? scheduler.now(),
+    // the emergency-freeze wrapper (Match.js) adds gameNow(): the match's own clock for the game time, which a frozen
+    // match holds still. The journal wrapper replaces the scheduler, so it has to forward it (or the match's deadlines
+    // throw and the draft never advances).
+    gameNow: () => eventNow ?? (typeof scheduler.gameNow === 'function' ? scheduler.gameNow() : scheduler.now()),
     setTimeout: (fn, ms) => register('setTimeout', fn, ms),
     setInterval: (fn, ms) => register('setInterval', fn, ms),
     clearTimeout: (h) => scheduler.clearTimeout(h),
