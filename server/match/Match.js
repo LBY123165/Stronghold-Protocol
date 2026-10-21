@@ -212,6 +212,7 @@ import { DataSource } from '../sim/simdata.js';
 import { createRng, deriveSeed } from '../sim/rng.js';
 import { GameData } from './gamedata.js';
 import { RealScheduler } from './scheduler.js';
+import { FreezeScheduler } from './freezeScheduler.js';
 import { createPoolGroups, drawDisabledBonds } from './pool.js';
 import { PlayerState } from './PlayerState.js';
 import { EffectDispatcher, getDefaultRegistry } from './effectsMeta.js';
@@ -315,7 +316,16 @@ export class Match {
     /** Co-op always keeps manual online players first (D004/D012); the upstream setting cannot disable that rule. */
     this.aiPicksLast = !this.isSolo;
     this.ownsScheduler = !opts.scheduler;
-    this.sched = opts.scheduler || new RealScheduler({ now: opts.now || Date.now, onError: (e) => this.reportError('timer', e) });
+    // 带宽应急保护 (docs/ASSET_CACHE.md): the FreezeScheduler holds every timer while the match is frozen
+    // (setEmergencyFreeze) and resumes the remaining delays without replaying missed ticks.
+    this.sched = new FreezeScheduler(opts.scheduler || new RealScheduler({ now: opts.now || Date.now, onError: (e) => this.reportError('timer', e) }), { ownsSource: this.ownsScheduler });
+    /** Server-controlled emergency protection is separate from the user's solo combat pause. */
+    this.emergencyFrozen = false;
+    this.emergencyFrozenAt = 0;
+    this.emergencyReason = null;
+    this.emergencyFrozenMs = 0;
+    this._emergencyLeaves = new Set();
+    this._emergencyLostAuthorities = new Set();
     this.registry = opts.registry || getDefaultRegistry();
     this.dispatcher = new EffectDispatcher(this, this.registry);
     this.BattleClass = typeof opts.BattleClass === 'function' ? opts.BattleClass : Battle;

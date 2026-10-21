@@ -64,6 +64,7 @@ import { ROOT, noopLog } from './config.js';
 import { sendError, sendJson } from './common.js';
 import { MIME, CompressCache, IMMUTABLE_CACHE, isNotModified, serveFile, serveBuffer } from './files.js';
 import { ASSET_INDEX_ROOTS, hashedFileOpts } from './assetIndex.js';
+import { RuntimeCache } from './runtimeCache.js';
 import { serveMedia } from './media.js';
 import { createPluginRegistry, sameIdentity, statIdentity } from '../plugins/registry.js';
 import { computeVanillaContent } from '../plugins/identity.js';
@@ -109,7 +110,7 @@ const CS_FILE = /^\/cs\/([0-9a-f]{16})\/([A-Za-z0-9._\/-]{1,200})$/;
  * Create the static request handler.
  * @param {{ publicDir: string, dataDir: string, sharedDir: string, simDir?: string, packsDir?: string, pluginsDir?: string,
  *   packs?: ReturnType<typeof createPluginRegistry>, content?: import('../plugins/identity.js').VanillaContent | null,
- *   log?: object,
+ *   log?: object, runtimeCache?: boolean,
  *   assetIndex?: ReturnType<typeof import('./assetIndex.js').createAssetIndex> | null,
  *   views?: ReturnType<typeof import('./assetViews.js').createManifestViews> | null,
  *   visual?: ReturnType<typeof createVisualSets> | null,
@@ -123,7 +124,7 @@ const CS_FILE = /^\/cs\/([0-9a-f]{16})\/([A-Za-z0-9._\/-]{1,200})$/;
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, rawPath: string, query: string) => Promise<void>}
  */
 export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = path.join(ROOT, 'server', 'sim'), packsDir = path.join(ROOT, 'packs'),
-  pluginsDir = path.join(path.dirname(path.resolve(packsDir)), 'plugins'), packs = null, content = null, log = noopLog,
+  pluginsDir = path.join(path.dirname(path.resolve(packsDir)), 'plugins'), packs = null, content = null, runtimeCache, log = noopLog,
   assetIndex = null, views = null, visual = null, contents = null }) {
   const registry = packs || createPluginRegistry({ publicDir, dataDir, packsDir, pluginsDir }, { log: /** @type {any} */ (log) });
   const sets = visual || (typeof registry.pluginFile === 'function' ? createVisualSets({ registry, log }) : null);
@@ -146,6 +147,9 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
   const shimBody = Buffer.from(DATA_SHIM_JS);
   const shimTag = `"shim-${shimBody.length.toString(16)}"`;
   const gzipCache = new CompressCache(); // brotli and gzip bodies (files.js)
+  const runtime = new RuntimeCache({ publicDir, dataDir, sharedDir, simDir, shimBody, enabled: runtimeCache });
+  const immutable = 'public, max-age=31536000, immutable';
+  const stale = (req, res) => sendError(req, res, 409, '页面资源版本已变化，请刷新页面 · Runtime version changed, reload');
 
   return async function serveStatic(req, res, rawPath, query) {
     let decoded;
@@ -161,10 +165,10 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
     const urlHash = hashed.hash;
     decoded = hashed.path;
     if (decoded === '/data.js') {
-      const headers = { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache', ETag: shimTag, 'Content-Length': shimBody.length };
-      if (isNotModified(req, shimTag, new Date(0))) { delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return; }
-      res.writeHead(200, headers);
-      res.end(req.method === 'HEAD' ? undefined : shimBody);
+      const version = await runtime.version(decoded, query);
+      if (version === false) { stale(req, res); return; }
+      await serveBuffer(req, res, shimBody, { type: MIME['.js'], tag: version ? `rv-${version.hash}` : shimTag,
+        cacheControl: version ? immutable : 'no-cache', cache: gzipCache });
       return;
     }
     // The plugin catalogue (server/plugins/registry.js; never cached) and the vanilla content set's manifest
@@ -303,6 +307,7 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
       if (e && e.code === 'ENOENT' && mount.name === 'data' && segments.length === 1 && LOCAL_ART_MANIFESTS.has(segments[0])) {
         // Optional local-client art (DESIGN §13): an install without it gets an empty manifest instead of a 404,
         // so browsers don't log an error on every page load. Clients treat empty groups as "no local art".
+        if (new URLSearchParams(query).has('rv')) { stale(req, res); return; }
         res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-cache', 'Content-Length': EMPTY_LOCAL_ART.length });
         res.end(req.method === 'HEAD' ? undefined : EMPTY_LOCAL_ART);
       } else if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR' || e.code === 'EISDIR' || e.code === 'ENAMETOOLONG')) {
@@ -326,6 +331,26 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
       const real = await fsp.realpath(absPath);
       const worker = await fsp.realpath(path.join(publicDir, 'js/battle/simWorker.js')).catch(() => null);
       if (real === worker) res.setHeader('Content-Security-Policy', SIM_WORKER_CSP);
+    }
+    // fork runtime versioning (build tag / stale detection): a runtime-tracked file is served from the runtime cache
+    const version = await runtime.version(decoded, query);
+    if (version === false) { stale(req, res); return; }
+    if (version) {
+      const body = await runtime.body(version, stat);
+      if (!body) { stale(req, res); return; }
+      await serveBuffer(req, res, body, { type: MIME[path.extname(absPath).toLowerCase()] || 'application/octet-stream',
+        tag: `rv-${version.hash}`, cacheControl: immutable, mtime: stat.mtime, cache: gzipCache });
+      return;
+    }
+    if (mount.name === 'public' && absPath === path.join(mount.dir, 'index.html')) {
+      let rendered;
+      try { rendered = await runtime.renderIndex(absPath); }
+      catch (error) { log.warn?.('[http] runtime cache unavailable, serving revalidated HTML', error.message); }
+      if (rendered) {
+        // Only a content ETag validates generated HTML: index.html's mtime alone cannot detect a data-only update.
+        await serveBuffer(req, res, rendered.body, { type: MIME['.html'], tag: rendered.tag, cache: gzipCache });
+        return;
+      }
     }
     const indexed = mount.name === 'public' && segments.length > 1 && ASSET_INDEX_ROOTS.includes(segments[0]);
     const opts = indexed ? hashedFileOpts(assetIndex, segments.join('/'), stat, urlHash) : (urlHash ? { cacheControl: 'no-cache' } : {});

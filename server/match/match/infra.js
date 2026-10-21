@@ -67,7 +67,7 @@ export class MatchInfra {
       return;
     }
     const ms = this.scaled(seconds * 1000);
-    this.deadline = silent ? 0 : this.sched.now() + ms;
+    this.deadline = silent ? 0 : this.sched.gameNow() + ms;
     this._phaseTimer = this.later(ms, () => { this._phaseTimer = null; if (this.test === true) { this._testArmed = null; this._testHeld = null; } fn(); });
     if (this.test === true) this._testArmed = { seconds, fn, silent: !!silent };
   }

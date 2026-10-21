@@ -139,7 +139,9 @@ export class MatchPlatform {
       this.cancelSetupVote();
       // a paused solo battle resumes (the server takes the field over; nobody is left to resume it)
       this._resume();
-      if (this.clientCombat) this._authorityLost(ps, 'disconnect');
+      // 带宽应急保护: the gameplay consequences of a frozen match's disconnects apply once, on recovery
+      if (this.emergencyFrozen) this._emergencyLostAuthorities.add(playerId);
+      else if (this.clientCombat) this._authorityLost(ps, 'disconnect');
       // a rehearsal this host was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
       this.markPublic();
@@ -196,7 +198,9 @@ export class MatchPlatform {
       this.watchers.delete(playerId);
       if (this.ended) return;
       this._resume();
-      if (this.clientCombat) this._authorityLost(ps, 'left');
+      // 带宽应急保护: the gameplay consequences of a frozen match's departures apply once, on recovery
+      if (this.emergencyFrozen) this._emergencyLostAuthorities.add(playerId);
+      else if (this.clientCombat) this._authorityLost(ps, 'left');
       // a rehearsal the departed seat was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
       this.markPublic();
@@ -275,6 +279,8 @@ export class MatchPlatform {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this._emergencyLeaves.clear();
+    this._emergencyLostAuthorities.clear();
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } }
     this._stopClientCombat();
     this._cancelRehearsal();

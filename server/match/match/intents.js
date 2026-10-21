@@ -20,10 +20,10 @@ export class MatchIntents {
         if (!ps.infoReady) { ps.infoReady = true; this.markPublic(); this.maybeEndInfo(); }
         return OK;
       case 'g.rerollVote': return this.voteSetupReroll(ps, msg.voteId, msg.agree);
-      case 'g.band': return this.pickBand(ps, msg.bandId);
-      case 'g.bandSkip': return this.skipBand(ps);
+      case 'g.band': return this.pickBand(ps, msg.bandId, msg);
+      case 'g.bandSkip': return this.skipBand(ps, msg);
       // the strategy highlighted in the draft screen (what a timed-out turn takes, timeoutBand)
-      case 'g.bandFocus': return this.bandFocus(ps, msg.bandId ?? null);
+      case 'g.bandFocus': return this.bandFocus(ps, msg.bandId ?? null, msg);
       case 'g.buy': return ps.buy(msg.slot);
       case 'g.refresh': return ps.refresh();
       case 'g.freeze': return ps.freeze();
@@ -38,7 +38,7 @@ export class MatchIntents {
       case 'g.reward': return ps.pickReward(msg.idx);
       case 'g.choice': return msg.choiceId !== undefined
         ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)
-        : this.pickCard(ps, msg.idx);
+        : this.pickCard(ps, msg.idx, msg);
       // a plugin interaction window (PLUGIN API v2, docs/PLUGINS.md §10b): the window's own id, not a draft card —
       // the host applies the declared primitive, a plugin never reaches the match state itself
       case 'g.offer': return this.requestOffer(ps, msg.offerId, msg.idx, msg);
@@ -49,6 +49,7 @@ export class MatchIntents {
       case 'g.watch': return this.watch(ps, msg.fieldId, msg.playerId ?? null);
       case 'g.autoplay': return this.setAutoplay(ps, !!msg.on);
       case 'g.pause': return this.setPause(ps, !!msg.on);
+      case 'g.uniteSkipVote': return this.voteSkipUnite(ps, msg);
       // the stats the board's units start their next battle with (the detail card in prep, user playtest #4 item 7)
       case 'g.unitStats': return this.unitStats(ps, msg.seq ?? null);
       case 'g.leave': this.onLeave(ps.playerId); return OK;
@@ -76,6 +77,10 @@ export class MatchIntents {
   setAutoplay(ps, on) {
     if (ps.autoplay === on) return OK;
     ps.autoplay = on;
+    // 托管 changes who is a manual picker: the drafts reorder (phases.js prioritizeDraftOrder) and a pending
+    // 联防 skip vote is re-evaluated, each only in the affected seat's group
+    this.refreshDraftPriority(ps.playerId);
+    this.refreshUniteSkipVote();
     this.markPublic();
     if (on) this.kickBot(ps);
     return OK;
@@ -83,11 +88,12 @@ export class MatchIntents {
 
   /** Let the bot act for a (newly) bot-controlled seat in the current phase. */
   kickBot(ps) {
+    if (this.emergencyFrozen) return;
     if (!ps.botControlled || this.ended) return;
     this.offersChanged();
     if (this.phase === PHASE.INFO_CHECK && !ps.infoReady) { ps.infoReady = true; this.markPublic(); this.maybeEndInfo(); }
-    else if (this.phase === PHASE.BAND_DRAFT && this.draftTurn() === ps.playerId) this.scheduleBandBot();
-    else if (this.phase === PHASE.SP_DRAFT && this.spTurn() === ps.playerId) this.scheduleSpBot();
+    else if (this.phase === PHASE.BAND_DRAFT && this.draftTurn(ps.playerId) === ps.playerId) this.scheduleBandBot(this.draftGroup(ps.playerId));
+    else if (this.phase === PHASE.SP_DRAFT && this.spTurn(ps.playerId) === ps.playerId) this.scheduleSpBot(this.spGroup(ps.playerId));
     else if (this.phase === PHASE.PREP && ps.alive && !ps.ready) this.scheduleBotPrep(ps, 0);
   }
 

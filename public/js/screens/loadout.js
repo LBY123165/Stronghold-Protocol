@@ -352,6 +352,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
            it has no skin). */ null}
       <${SkinSection} charId=${chess.charId} />
       <${CultivationSection} charId=${chess.charId} ops=${ops} onSet=${onOps} standIn=${notOwned} />
+      <${SkinSection} chess=${chess} />
       <${LoadoutGarrisons} chess=${level === 'elite' && golden ? golden : chess} m=${m} />
       <section class="lo-sec">
         <header class="lo-sec__head">

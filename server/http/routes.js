@@ -18,6 +18,10 @@
 // answers 500.
 
 import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
+import { isAnnouncementId } from '../../shared/announcements.js';
+import { ANNOUNCEMENT_ASSET_URL_PREFIX } from '../../shared/announcementAssets.js';
+import { serveAnnouncementAsset } from './announcementAssets.js';
+import { ASSET_CACHE_PREFIX } from './assetCache.js';
 import { buildTag } from './buildTag.js';
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
 import { clientAddress, isLocalIp } from '../net.js';
@@ -48,7 +52,7 @@ function contentSets(lobby) {
  *   content: the server's vanilla content (server/plugins/identity.js)
  * @param {boolean} [withTraffic]
  */
-export function healthReport({ startedAt, network, registry, lobby, content = null, traffic, assetIndex, views, trusted }, withTraffic = false) {
+export function healthReport({ startedAt, network, registry, lobby, content = null, traffic, assetIndex, views, trusted, bandwidthEmergency }, withTraffic = false) {
   const report = {
     ok: true, version: PROTOCOL_VERSION, app: APP_VERSION, uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     // the runtime the server is serving right now (public/js/ui/buildGuard.js): a page whose own build is
@@ -59,6 +63,7 @@ export function healthReport({ startedAt, network, registry, lobby, content = nu
     // it has, when it has some (a page's title screen says so; P1a)
     ...(content ? { content: { vanilla: content.cs, sets: contentSets(lobby), ...pluginCount(lobby) } } : {}),
     sockets: network.connectionCount, sessions: registry.size, ...lobby.stats(),
+    ...(bandwidthEmergency ? { bandwidthEmergency: bandwidthEmergency.status() } : {}),
   };
   if (trusted && Object.keys(trusted).length) report.plugins = trusted;
   if (withTraffic && traffic) report.traffic = traffic.snapshot();
@@ -76,17 +81,55 @@ const wantsTraffic = (query) => /(?:^|&)traffic(?:=(?:1|true|yes))?(?:&|$)/i.tes
  *             rawPath: string, query: string) => Promise<void>,
  *           health: Parameters<typeof healthReport>[0], log: object, trustProxy?: 'auto' | boolean,
  *           csp?: string | null,
- *           studio?: { handles: (rawPath: string) => boolean, handle: (req: any, res: any, rawPath: string, query: string) => Promise<void> } | null }} deps
+ *           studio?: { handles: (rawPath: string) => boolean, handle: (req: any, res: any, rawPath: string, query: string) => Promise<void> } | null,
+ *           announcements?: ReturnType<typeof import('../announcements.js').createAnnouncementStore>,
+ *           assetCache?: ReturnType<typeof import('./assetCache.js').createAssetCacheHandler> }} deps
  *   trustProxy: whose forwarding headers name the client (net.js clientAddress; the server's TRUST_PROXY); studio: the
  *   plugin studio (server/studio/index.js), or none
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, trustProxy = 'auto', studio = null, csp = null, trustedRuntime = null }) {
+export function createRequestHandler({ serveStatic, health, log, trustProxy = 'auto', studio = null, csp = null, trustedRuntime = null,
+  announcements, assetCache, admin = null, accounts = null, emergency = () => null }) {
+  // Include in-flight ordinary assets/runtime/announcements, not just explicit filling. Emergency trip
+  // releases these responses as well, so a cold visitor cannot retain its old streaming budget.
+  const publicResponses = new Set();
+  const accountAttempts = new Map();
+  function track(res) {
+    publicResponses.add(res);
+    const done = () => { publicResponses.delete(res); res.off('finish', done); res.off('close', done); };
+    res.once('finish', done); res.once('close', done);
+  }
   async function handleRequest(req, res) {
     const url = req.url || '/';
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
     const parts = splitUrl(url);
     if (!parts) { sendError(req, res, 400, '请求地址无效 · Bad request'); return; }
+    // The operator console (docs/ADMIN.md) is answered FIRST, on purpose:
+    //   * before the method check, because it accepts POST (login / broadcast / maintenance / close);
+    //   * before the emergency gate, because an operator needs it exactly while the server protects itself.
+    // It is its own mount (own auth, own 404 when disabled), never part of the public surface.
+    if (admin && await admin(req, res, parts)) return;
+    if (accounts && req.method === 'POST' && ['/api/account/register', '/api/account/login'].includes(parts.rawPath)) {
+      const address = clientAddress(req).ip;
+      const now = Date.now();
+      const prior = accountAttempts.get(address);
+      const attempts = prior && now - prior.since < 5 * 60_000 ? prior.count : 0;
+      if (attempts >= 12) { res.setHeader('Retry-After', '300'); sendJson(req, res, 429, { error: 'RATE_LIMITED' }); return; }
+      if (accountAttempts.size > 4096) for (const [ip, item] of accountAttempts) if (now - item.since >= 5 * 60_000) accountAttempts.delete(ip);
+      const chunks = []; let size = 0;
+      for await (const chunk of req) { size += chunk.length; if (size > 8192) { sendJson(req, res, 413, { error: 'REQUEST_TOO_LARGE' }); return; } chunks.push(chunk); }
+      let body;
+      try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { sendJson(req, res, 400, { error: 'BAD_REQUEST' }); return; }
+      const result = parts.rawPath.endsWith('/register')
+        ? await accounts.create(body?.username, body?.password)
+        : await accounts.login(body?.username, body?.password);
+      if (result.error) {
+        accountAttempts.set(address, { since: prior && now - prior.since < 5 * 60_000 ? prior.since : now, count: attempts + 1 });
+        const status = result.error === 'NAME_TAKEN' ? 409 : result.error === 'INVALID_INPUT' ? 400 : 401;
+        sendJson(req, res, status, { error: result.error });
+      } else { accountAttempts.delete(address); sendJson(req, res, 200, result); }
+      return;
+    }
     if (trustedRuntime && parts.rawPath.startsWith('/x/') && await trustedRuntime.route(req,res,parts.rawPath)) return;
     if (studio && studio.handles(parts.rawPath)) { await studio.handle(req, res, parts.rawPath, parts.query); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -99,16 +142,53 @@ export function createRequestHandler({ serveStatic, health, log, trustProxy = 'a
       sendJson(req, res, 200, healthReport(health, withTraffic));
       return;
     }
+    const protection = emergency();
+    if (protection?.active) {
+      const seconds = protection.retryAt ? Math.max(1, Math.ceil((protection.retryAt - Date.now()) / 1000)) : 120;
+      res.setHeader('Retry-After', String(seconds));
+      res.setHeader('Connection', 'close');
+      sendJson(req, res, 503, { error: parts.rawPath.startsWith(ASSET_CACHE_PREFIX)
+        ? 'ASSET_CACHE_EMERGENCY' : 'SERVER_EMERGENCY', emergency: true, retryAfterSec: seconds });
+      return;
+    }
+    track(res);
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (parts.rawPath.startsWith(ASSET_CACHE_PREFIX)) {
+      if (!assetCache) { sendJson(req, res, 503, { error: 'ASSET_CACHE_UNAVAILABLE' }); return; }
+      await assetCache.serve(req, res, parts.rawPath, parts.query);
+      return;
+    }
+    if (parts.rawPath === '/api/announcements') {
+      sendJson(req, res, 200, announcements?.list() || { revision: '', pinnedId: null, items: [] });
+      return;
+    }
+    if (parts.rawPath.startsWith('/api/announcements/')) {
+      let id;
+      try { id = decodeURIComponent(parts.rawPath.slice('/api/announcements/'.length)); } catch { /* invalid URL */ }
+      const article = isAnnouncementId(id) ? announcements?.read(id) : null;
+      sendJson(req, res, article ? 200 : 404, article || { error: 'ANNOUNCEMENT_NOT_FOUND' });
+      return;
+    }
+    if (parts.rawPath === ANNOUNCEMENT_ASSET_URL_PREFIX.slice(0, -1) || parts.rawPath.startsWith(ANNOUNCEMENT_ASSET_URL_PREFIX)) {
+      await serveAnnouncementAsset(req, res, parts.rawPath.slice(ANNOUNCEMENT_ASSET_URL_PREFIX.length), announcements, log);
+      return;
+    }
     await serveStatic(req, res, parts.rawPath, parts.query);
   }
 
-  return (req, res) => {
+  const listener = (req, res) => {
     setSecurityHeaders(res);
     if (csp) res.setHeader('Content-Security-Policy', csp);
-    if (health.traffic) health.traffic.meter(res, splitUrl(req.url || '/')?.rawPath || '/');
+    if (health?.traffic) health.traffic.meter(res, splitUrl(req.url || '/')?.rawPath || '/');
     handleRequest(req, res).catch((e) => {
+      if (res.destroyed) return;
       log.error('[http] request failed', e);
       sendError(req, res, 500, '服务器内部错误 · Internal error');
     });
   };
+  listener.abortPublicRequests = () => {
+    for (const res of publicResponses) res.destroy();
+    publicResponses.clear();
+  };
+  return listener;
 }

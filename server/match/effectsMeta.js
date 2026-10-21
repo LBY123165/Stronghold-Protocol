@@ -641,7 +641,10 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         return typeof opts.filter === 'function' ? !!opts.filter(id) : true;
       };
       const extra = typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null;
-      return ps.pool.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: typeof opts.filter === 'function' ? (id) => !!opts.filter(id) : null, extra });
+      // 0.3.1's behaviour (the golden digests are its): the pool roll gets the plain filter; `opts.bond` and
+      // `opts.ignoreCounts` are not passed on (server/match/builtinMeta.js asks for ignoreCounts, upstream drops it).
+      const filter = typeof opts.filter === 'function' ? (id) => !!opts.filter(id) : null;
+      return ps.pool.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter, extra });
     },
     rollItem: (opts = {}) => m.rollItemId({ ...opts, player: ps }),
     /**
