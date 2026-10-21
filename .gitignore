@@ -70,3 +70,4 @@ public/dev/simcheck/data/
 
 # generated skin plugins (game art never enters git; tools/skins-plugin.mjs rebuilds them)
 plugins/stronghold-skins*/
+/.workbuddy
