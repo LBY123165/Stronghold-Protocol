@@ -114,9 +114,10 @@ export const RUNTIME_RESEARCH = ['docs/research/03-operators.json', 'docs/resear
 export const PLAYER_SCRIPTS = ['scripts/install-service-windows.ps1', 'scripts/launch.mjs', 'scripts/open-browser.mjs',
   'scripts/run-server.cmd', 'scripts/start-windows-sandbox.bat', 'scripts/start-windows.bat', 'scripts/start-windows.ps1', 'scripts/start.sh'];
 /** The tools a player runs (npm run setup / doctor / assets, the postinstall) and the ones setup starts. */
-export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', 'tools/fetch-assets.mjs', 'tools/fetch-stats-assets.mjs', 'tools/setup.mjs', 'tools/vendor.mjs', 'tools/plugin.mjs'];
+export const PLAYER_TOOLS = ['tools/announcements.mjs', 'tools/asset-cache-pack.mjs', 'tools/crop-board-atlas.mjs', 'tools/doctor.mjs',
+  'tools/fetch-assets.mjs', 'tools/fetch-stats-assets.mjs', 'tools/server-settings.mjs', 'tools/setup.mjs', 'tools/vendor.mjs', 'tools/plugin.mjs'];
 /** Whole tool directories: fetch-assets' modules, the local-client extraction setup runs. */
-export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/local-extract/'];
+export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/asset-cache/', 'tools/local-extract/'];
 /** Whole runtime directories (their tracked files). */
 export const RUNTIME_DIRS = ['server/', 'shared/', 'data/', 'public/', 'packs/', 'schemas/'];
 /** Written into the stage, never taken from the checkout: the pack index of the shipped packs. */
@@ -173,7 +174,7 @@ export const FX_ART_PREFIX = 'public/assets/local/fx/';
  * what 0.2.0 leaves out on purpose. A path is refused when it is one of these or lies under one.
  */
 export const REFUSE = ['pv', '3，9，11回合情况', 'review', 'docs/research/10-networking-hosting.md', '.cache', '.claude', '.git',
-  'logs', 'test/e2e/out', 'scripts/service.env.cmd', '.env', 'handoff',
+  'logs', 'runtime', 'test/e2e/out', 'scripts/service.env.cmd', '.env', 'handoff',
   'test', '.github', 'AGENTS.md', 'public/dev', 'node_modules/.cache'];
 
 /** Home-directory paths: macOS / Linux (case as the OS writes them) and Windows (any case; / or \, JSON-escaped too). */
