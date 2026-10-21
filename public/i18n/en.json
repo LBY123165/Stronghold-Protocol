@@ -2412,5 +2412,7 @@
   "还没有账号？注册": "Need an account? Register",
   "登录尝试过多，请 5 分钟后重试": "Too many sign-in attempts. Try again in 5 minutes.",
   "3 至 24 个字符，至少含一个字母或数字": "3–24 characters, including a letter or number",
-  "用户名需为 3 至 24 个字符，且至少含一个字母或数字；密码至少 8 位": "Username must be 3–24 characters and include a letter or number; password must be at least 8 characters"
+  "用户名需为 3 至 24 个字符，且至少含一个字母或数字；密码至少 8 位": "Username must be 3–24 characters and include a letter or number; password must be at least 8 characters",
+  "房间聊天": "Room chat",
+  "房间聊天，{n} 条未读": "Room chat, {n} unread messages"
 }

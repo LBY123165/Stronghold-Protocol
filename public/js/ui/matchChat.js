@@ -2,12 +2,12 @@
 // match chat controller: this view neither persists messages nor writes drafts to browser storage.
 
 import { useEffect, useLayoutEffect, useRef, useState } from '../../vendor/hooks.module.js';
-import { html, Icon } from './components.js';
+import { html, Icon, Fragment } from './components.js';
 import { toastError } from './toasts.js';
 import { t } from '../../../shared/i18n.js';
 import { CHAT_LIMITS, chatTextLength } from '../../../shared/matchChat.js';
 import { useStore } from '../store.js';
-import { chatStore, chatActions, selectChatUnread } from '../matchChat.js';
+import { chatStore, chatActions, selectChatUnread, lobbyChatStore, lobbyChatActions } from '../matchChat.js';
 import { PlayerAvatar } from './gameComponents.js';
 import { poolGroups } from './gameLogic/groups.js';
 
@@ -193,4 +193,38 @@ export function MatchChatHost({ phase, away = false }) {
     unread=${selectChatUnread(state)} connected=${connected} onClose=${() => chatActions.setOpen(false)}
     onDraft=${chatActions.setDraft} onSend=${chatActions.send} onRead=${chatActions.markRead}
     style=${anchor ? `--mchat-left:${anchor.left}px;--mchat-bottom:${anchor.bottom}px` : undefined} />`;
+}
+
+/**
+ * The waiting-room chat: the same panel, in the room screen, while no match runs. It is a separate channel with
+ * its own store, so the room screen never shows a match's history and vice versa.
+ */
+export function LobbyChatToggle({ open = false, unread = 0, onToggle, class: cls }) {
+  const count = Math.max(0, Number(unread) || 0);
+  return html`<button type="button" class=${cx('mchat-toggle', 'mchat-toggle--lobby', open && 'is-open', count && 'has-unread', cls)}
+    aria-label=${count ? t('房间聊天，{n} 条未读', { n: count }) : t('房间聊天')}
+    aria-haspopup="dialog" aria-expanded=${open ? 'true' : 'false'} data-lobby-chat-toggle="true"
+    onPointerDown=${(e) => e.stopPropagation()} onClick=${(e) => { e.stopPropagation(); onToggle?.(!open); }}>
+    <${Icon} name="chat" />
+    ${count ? html`<span class="mchat-toggle__badge">${count > 99 ? '99+' : count}</span>` : null}
+  </button>`;
+}
+
+/** The waiting-room panel and its toggle, mounted by the room screen. */
+export function LobbyChatHost({ room, myId }) {
+  const state = useStore((s) => s, Object.is, lobbyChatStore);
+  const connected = useStore((s) => s.connection.status === 'online');
+  const seats = room?.seats || [];
+  const spectators = room?.spectators || [];
+  if (!state.chatId) return null;
+  const canSend = !!myId && connected;
+  return html`<${Fragment} >
+    <${LobbyChatToggle} open=${state.open} unread=${selectChatUnread(state)}
+      onToggle=${(on) => lobbyChatActions.setOpen(on)} />
+    <${MatchChatPanel} open=${state.open} messages=${state.messages} draft=${state.draft}
+      players=${seats} spectators=${spectators} unread=${selectChatUnread(state)} connected=${connected}
+      canSend=${canSend} onClose=${() => lobbyChatActions.setOpen(false)}
+      onDraft=${lobbyChatActions.setDraft} onSend=${lobbyChatActions.send} onRead=${lobbyChatActions.markRead}
+      class="mchat-panel--lobby" />
+  <//>`;
 }

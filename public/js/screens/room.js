@@ -30,6 +30,7 @@ import { AssetCacheButton } from '../ui/assetCache.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
 import { LoadoutButton } from './loadout.js';
+import { LobbyChatHost } from '../ui/matchChat.js';
 import { PluginTag, isModdedRoom } from '../ui/pluginTag.js';
 import { hasScriptConsent, rememberScriptConsent } from '../content.js';
 import { net } from '../net.js';
@@ -387,6 +388,7 @@ export function RoomScreen() {
       </div>
       <div class="topbar__right">
         ${coop ? html`<${InviteBox} code=${room.code} name=${me.name} difficulty=${room.difficulty} />` : html`<div class="solo-note"><${MicroLabel}>SINGLE OPERATOR<//><span>${t('仅限 1 名博士')}</span></div>`}
+        <${LobbyChatHost} room=${room} myId=${me.playerId} />
       </div>
     </header>
 

@@ -152,3 +152,20 @@ node --test test/wire-pressure.test.js
 历史只在服务器 `matchCtx.chat` 和独立浏览器 `chatStore` 的 RAM 中存在，最终结算、失败或销毁按生命周期清空。不进入 `m.public` / `m.private`、周期性房间快照、战斗结果、回放、诊断、战绩或磁盘文件；正常消息不会触发额外历史请求。查看面板不请求服务器记录。
 
 维护定向测试：`test/match-chat.test.js`、`test/match-chat-ws.test.js`、`test/ui/match-chat-model.test.js` 以及 `test/wire-codec.test.js`。容量准备和聊天的完整依据见 [DEV-20261011-04](development/records/2026-10-11-04-ready-and-match-chat.md)。
+
+## 9. 房间准备期的聊天通道
+
+等待期聊天是同一套骨架的**第二条独立通道**，让房间在开局前也能说话。它不新增消息类型，也不改 `m.chat` / `m.chatState` 的字段布局——`matchId` 字段名在线上保持不变，等待期通道用的是另一个独立标识，所以两个通道的历史永不混淆，客户端靠标识区分推送归属。
+
+| 类型 | 方向 | 内容与用途 |
+|---|---|---|
+| `room.lobbyChat` | C2S | `{chatId, text}`，与 `room.chat` 同样的成员校验、限流与文本规则 |
+| `m.chat` / `m.chatState` | S2C | 复用既有类型；`matchId` 装的是等待期通道标识 |
+
+`room.state.lobbyChatId` 走原扩展位：房间真正处于等待期时是该通道的标识，运行中与对局结束后立即为 `null`。**待重放的对局结果优先**——一局刚结束时房间已回到等待期，但玩家仍欠着结果帧，此时不推送等待期历史（否则结果重放序列会被插入一帧聊天快照）。
+
+开局即 `clear()` 关闭等待期通道（两条历史从此不混）；对局结束时重开，因为房间可以连续开多局，而 `MatchChat.clear()` 的 `closed` 不可恢复。玩家离开房间或观战时按既有路径清掉其发送限流额度。
+
+客户端用同一个模型实例化两份（`createMatchChatModel({ idField, requestType })`），各自持有独立 store，房间界面因此永不会显示某局对战的历史。面板复用 `MatchChatPanel`，仅房间顶栏多一个开关。
+
+维护定向测试：`test/lobby-chat-ws.test.js`、`test/ui/lobby-chat-model.test.js`，以及保证既有通道未受影响的 `test/match-chat*.test.js`、`test/lobby.test.js`。

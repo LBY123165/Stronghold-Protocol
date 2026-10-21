@@ -292,6 +292,13 @@ export class Room {
     this.match = null;
     /** @type {{ live: boolean, ended: boolean, disposed: boolean, match: any, chat: MatchChat } | null} */
     this.matchCtx = null;
+    /**
+     * The waiting-room chat: the same ephemeral channel as the match chat, but alive while the room waits for
+     * players (before the first match starts). It is a separate instance, so the waiting-room history never
+     * leaks into a match and a match's history never shows up in the waiting room.
+     * @type {MatchChat}
+     */
+    this.lobbyChat = new MatchChat();
     this.matchCount = 0;
     /** @type {any} summary passed to onEnd by the last match */
     this.lastSummary = null;
@@ -357,6 +364,9 @@ export class Room {
       // v1 extension metadata only: message bodies never ride room/public snapshots or result replay.
       chatMatchId: this.match && this.matchCtx?.live && !this.matchCtx.ended && !this.matchCtx.chat.closed
         ? this.matchCtx.chat.matchId : null,
+      // the waiting-room chat's own id: it is only valid while the room has no running match, so a client that
+      // opened the room screen can tell the two channels apart and drop a stale id after the match starts.
+      lobbyChatId: !this.match ? this.lobbyChat.matchId : null,
       seats: this.seats.map((s) => (s
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
           // a room with gameplay plugins (header "Gameplay plugins"): has this player's page loaded and checked its content?
@@ -708,7 +718,7 @@ export class Lobby {
    */
   handleMessage(session, msg, ctx = null) {
     if (this.emergency.active && (['lobby.quickMatch', 'room.create', 'room.start', 'room.rerollSetup',
-      'room.cancelReroll', 'room.loadout', 'room.ownership', 'room.diy', 'room.chat'].includes(msg.t)
+      'room.cancelReroll', 'room.loadout', 'room.ownership', 'room.diy', 'room.chat', 'room.lobbyChat'].includes(msg.t)
       || (msg.t === 'lobby.watch' && msg.on))) return fail(ERR.SERVER_EMERGENCY);
     switch (msg.t) {
       case 'lobby.watch': return this.discovery.watch(session, msg);
@@ -738,6 +748,7 @@ export class Lobby {
       case 'room.contentReady': return this.contentReady(session, msg, ctx);
       case 'room.consent': return this.consent(session,msg);
       case 'room.chat': return this.chat(session, msg);
+      case 'room.lobbyChat': return this.lobbyChat(session, msg);
       default:
         if (typeof msg.t === 'string' && msg.t.startsWith('g.')) return this.routeGameNow(session, msg);
         return fail(ERR.BAD_MSG, `unhandled type ${String(msg.t).slice(0, 32)}`);
@@ -922,6 +933,8 @@ export class Lobby {
     if (room.match) {
       this.callMatch(room, 'addSpectator', session.playerId);
       this.sendChatState(room, session.playerId);
+    } else {
+      this.sendLobbyChatState(room, session.playerId);
     }
     return OK;
   }
@@ -1501,6 +1514,10 @@ export class Lobby {
     if (room.test && !this.testEnabled) return fail(ERR.TEST_DISABLED);
     const host = room.seatOf(room.hostId);
     if (host) host.ready = true;
+    // the waiting-room chat ends with the match: from here on the room speaks through the match's own channel,
+    // so the two histories never mix and a stale room chat id is rejected. The channel reopens when the room
+    // plays again, with a fresh id, so the old one can never address the new one.
+    room.lobbyChat.clear();
     // the room's data: its content set's in a room with gameplay plugins (header "Gameplay plugins")
     const data = this.dataFor(room);
     const seats = room.seats.filter(Boolean).map((s) => {
@@ -1589,6 +1606,9 @@ export class Lobby {
     if (ctx.ended || !ctx.live || room.matchCtx !== ctx || room.disposed) return;
     ctx.ended = true;
     ctx.chat.clear();
+    // the room is back in the waiting phase: a fresh waiting-room chat opens, so the players can talk while the
+    // next round is set up. The id changes, so a client that still holds the previous one is told to re-sync.
+    room.lobbyChat.reopen();
     room.lastSummary = summary ?? null;
     room.match = null;
     room.matchCtx = null;
@@ -1712,6 +1732,9 @@ export class Lobby {
       this.sendChatState(room, session.playerId);
       return;
     }
+    // The waiting-room history is only for a room that is actually waiting (sendLobbyChatState checks the
+    // pending result replay), so a room whose last match just ended does not interleave the two sequences.
+    this.sendLobbyChatState(room, session.playerId);
     const frames = this.replayFor(room, session.playerId);
     if (frames) for (const frame of frames) sendRaw(session.ws, frame);
   }
@@ -1820,6 +1843,40 @@ export class Lobby {
     this.sendToPlayer(room, playerId, ctx.chat.snapshot());
   }
 
+  /**
+   * The waiting-room chat: the room's own channel while no match runs. Connected room humans and spectators may
+   * talk; bots and departed members may not. The channel is closed once a match starts, so the waiting-room
+   * history never mixes with a match's history.
+   */
+  lobbyChat(session, { chatId, text }) {
+    const room = this.roomOf(session);
+    if (!room) return fail(ERR.NOT_IN_ROOM);
+    if (room.match) return fail(ERR.WRONG_PHASE, 'the match has started');
+    if (room.lobbyChat.closed) return fail(ERR.WRONG_PHASE, 'the room chat is closed');
+    if (chatId !== room.lobbyChat.matchId) return fail(ERR.BAD_TARGET, 'stale room chat');
+    const member = room.seatOf(session.playerId) || room.spectatorOf(session.playerId);
+    if (!session.connected || this.registry.byId(session.playerId) !== session || !member || member.isBot || member.left || !member.connected) {
+      return fail(ERR.NOT_IN_ROOM);
+    }
+    const spectator = !!room.spectatorOf(session.playerId);
+    const res = room.lobbyChat.append({ playerId: member.playerId, name: member.name, seat: spectator ? null : member.seat,
+      spectator }, text);
+    if (res.error) return fail(res.error, res.detail);
+    this.broadcastRoom(room, res.message);
+    return OK;
+  }
+
+  /**
+   * The waiting-room history on join/resume, under the existing heavy resync policy.
+   *
+   * A room that still owes the player the last match's result frames is not waiting yet: the result replay and
+   * the chat history are separate sequences, and interleaving them would break the replay's frame order.
+   */
+  sendLobbyChatState(room, playerId) {
+    if (room.match || room.lobbyChat.closed || room.replay) return;
+    this.sendToPlayer(room, playerId, room.lobbyChat.snapshot());
+  }
+
   /** Call an optional match hook without letting it throw. onLeave falls back to onDisconnect. */
   callMatch(room, method, ...args) {
     const m = room.match;
@@ -1902,6 +1959,7 @@ export class Lobby {
     const seat = room.seatOf(playerId);
     if (!seat || seat.isBot || seat.left || room.disposed) return;
     room.matchCtx?.chat.forgetPlayer(playerId);
+    room.lobbyChat.forgetPlayer(playerId);
     if (room.match) {
       seat.left = true;
       seat.connected = false;
@@ -1925,6 +1983,7 @@ export class Lobby {
     if (i < 0) return false;
     room.spectators.splice(i, 1);
     room.matchCtx?.chat.forgetPlayer(playerId);
+    room.lobbyChat.forgetPlayer(playerId);
     if (room.disposed) return true;
     this.callMatch(room, 'removeSpectator', playerId);
     this.broadcastState(room);

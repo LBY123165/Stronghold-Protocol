@@ -599,6 +599,8 @@ export const C2S = {
   'g.emote': { id: (v) => EMOTES.includes(v) },
   // Match-only room communication, dispatched by Lobby independently of gameplay/spectator restrictions.
   'room.chat': { matchId: isId, text: isChatTextInput },
+  // the waiting-room chat (before the first match starts): the same channel, the room's own id
+  'room.lobbyChat': { chatId: isId, text: isChatTextInput },
   // playerId: the player tapped in the team panel (a 联防 / boss pair field shows two) — what an eliminated viewer or a
   // spectator seat follows from then on (Match.watchPref; community report of 2026-10-06, item 56)
   'g.watch': { fieldId: (v) => isStr(v, 32), playerId: isId, $optional: ['playerId'] },

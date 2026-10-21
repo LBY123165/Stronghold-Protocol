@@ -69,7 +69,7 @@ import { t, N_, translateWire } from '../../shared/i18n.js';
 import { recordError, installTrafficMeter } from './diag.js';
 import { installContent, installContentSet } from './content.js';
 import { cosmetics } from './cosmetics.js';
-import { installMatchChat } from './matchChat.js';
+import { installMatchChat, installLobbyChat } from './matchChat.js';
 
 const RESTORE_GRACE_MS = 1500;
 const JOIN_DELAY_MS = 350;
@@ -429,6 +429,7 @@ async function boot() {
 
   wireNet();
   installMatchChat({ net, appStore: store });
+  installLobbyChat({ net, appStore: store });
   installAnnouncements({ appStore: store, selectRoute, net, restoreGraceMs: RESTORE_GRACE_MS });
   installUrgentAnnouncements({ net });
   installAssetCache();

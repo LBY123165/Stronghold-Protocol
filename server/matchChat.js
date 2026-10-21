@@ -65,4 +65,18 @@ export class MatchChat {
     this.players.clear();
     this.seq = 0;
   }
+
+  /**
+   * A room that plays again gets a fresh waiting-room channel: the old one is closed for good, so a stale id
+   * from the previous round can never address the new one. The new channel starts empty and open.
+   * @returns {MatchChat}
+   */
+  reopen() {
+    this.clear();
+    this.closed = false;
+    this.matchId = `chat_${randomBytes(12).toString('hex')}`;
+    this.seq = 0;
+    this.roomBucket = new TokenBucket(10, 20, this.now());
+    return this;
+  }
 }
