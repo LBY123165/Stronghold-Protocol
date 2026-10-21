@@ -2414,5 +2414,20 @@
   "3 至 24 个字符，至少含一个字母或数字": "3–24 characters, including a letter or number",
   "用户名需为 3 至 24 个字符，且至少含一个字母或数字；密码至少 8 位": "Username must be 3–24 characters and include a letter or number; password must be at least 8 characters",
   "房间聊天": "Room chat",
-  "房间聊天，{n} 条未读": "Room chat, {n} unread messages"
+  "房间聊天，{n} 条未读": "Room chat, {n} unread messages",
+  "断线接管": "Disconnected seat",
+  "断线接管投票": "Disconnected seat vote",
+  "{name} 掉线了": "{name} dropped",
+  "未开启 AI 托管，房间需要决定这个席位由谁接管。": "They are not on AI control. The room must decide who takes the seat.",
+  "AI 接管": "AI takeover",
+  "队友接替": "A teammate steps in",
+  "{votes}/{needed} 票": "{votes}/{needed} votes",
+  "投此选项": "Vote for this",
+  "没有有余力的队友可接替，只能由 AI 接管。": "No teammate has spare capacity; only an AI can take the seat.",
+  "你不是本房间的在线玩家，无法参与该决定。": "You are not one of this room's online players, so you cannot vote.",
+  "连接断开，暂时无法投票。": "The connection is down, so voting is unavailable.",
+  "{name} 席位接管投票：{votes}/{needed}": "Vote for {name}'s seat: {votes}/{needed}",
+  "某一项过半数即生效。": "Either option takes effect as soon as it has the majority.",
+  "断线接管：{name} 的席位由 AI 接管": "AI takes over {name}'s seat after the dropout",
+  "断线接管：{name} 接替 {name2} 的席位": "{name} steps into {name2}'s seat after the dropout"
 }

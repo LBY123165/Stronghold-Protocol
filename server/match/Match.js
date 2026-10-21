@@ -227,6 +227,7 @@ import { MatchIntents } from './match/intents.js';
 import { MatchPause } from './match/pause.js';
 import { MatchPhases } from './match/phases.js';
 import { MatchSetupVote } from './match/setupVote.js';
+import { MatchTakeover } from './match/takeover.js';
 import { MatchSpDraft } from './match/spDraft.js';
 import { MatchPrep } from './match/prep.js';
 import { MatchCombat } from './match/combat.js';
@@ -476,6 +477,12 @@ export class Match {
     this.setupVote = null;
     this._setupVoteSeq = 0;
     this._lastSetupVoteAt = -Infinity;
+    // 断线接管投票 (GitHub #338 follow-up): the open vote about a disconnected seat, the seat that waits for the
+    // room's decision, and the pending grace timers.
+    this.takeoverVote = null;
+    this.takeoverPending = null;
+    this._takeoverVoteSeq = 0;
+    this._takeoverGrace = new Map();
     this._turnTimer = null;
     this._pubDirty = false;
     this._pubTimer = null;
@@ -535,7 +542,7 @@ export class Match {
 }
 
 // the method modules, in this order (a name defined twice is an error, never a silent override)
-for (const part of [MatchPlatform, MatchInfra, MatchMessaging, MatchViews, MatchWatch, MatchIntents, MatchPause, MatchPhases, MatchSetupVote, MatchSpDraft, MatchPrep, MatchCombat, MatchClientCombat, MatchRehearsal, MatchReports, MatchUnite, MatchBoss, MatchSettle, MatchTestCommands, MatchOffers]) {
+for (const part of [MatchPlatform, MatchInfra, MatchMessaging, MatchViews, MatchWatch, MatchIntents, MatchPause, MatchPhases, MatchSetupVote, MatchTakeover, MatchSpDraft, MatchPrep, MatchCombat, MatchClientCombat, MatchRehearsal, MatchReports, MatchUnite, MatchBoss, MatchSettle, MatchTestCommands, MatchOffers]) {
   for (const key of Reflect.ownKeys(part.prototype)) {
     if (key === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(Match.prototype, key)) throw new Error(`Match.${String(key)} is defined twice`);

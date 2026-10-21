@@ -609,6 +609,11 @@ export const C2S = {
   // browser's local runner) — solo matches only (co-op ⇒ WRONG_PHASE), only while a battle runs; m.public.paused
   'g.pause': { on: isBool },
   'g.uniteSkipVote': { voteId: isId, $optional: ['voteId'] },
+  // 断线接管投票 (GitHub #338 follow-up): a teammate whose seat is taken over votes on the way the seat is filled.
+  //   targetPlayerId: the disconnected seat; mode: 'bot' (an AI takes over) | 'handover' (a teammate takes the seat);
+  //   candidatePlayerId: the teammate who takes the seat (mode 'handover' only).
+  'g.takeoverVote': { targetPlayerId: isId, mode: (v) => v === 'bot' || v === 'handover',
+    candidatePlayerId: (v) => isId, $optional: ['candidatePlayerId'] },
   // the stats the own board's units start their next battle with (user playtest #4 item 7; prep phases): answered by
   // the push m.unitStats { seq, round, units: [unitStatsEntry] }; `seq` is echoed so the client keeps the newest answer
   'g.unitStats': { seq: (v) => isInt(v, 0, 2 ** 31), $optional: ['seq'] },

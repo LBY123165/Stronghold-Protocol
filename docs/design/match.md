@@ -146,6 +146,40 @@ Deterministic-ish heuristic player used for (a) AI teammates, (b) auto-play for 
 
 ---
 
+### 6.7 断线接管投票 (takeover.js, v0.3.1 fork, [ASSUMED])
+
+A teammate's socket is gone and they are not on AI 托管 — the seat keeps its last lineup and the server simulates
+it (the official behaviour, §6.6). This fork instead asks the room how the seat should be filled: an AI takes it over,
+or a teammate with spare capacity steps into it.
+
+[ASSUMED] Every rule of the vote is a remake convenience, not an official rule — the official mode has no such vote.
+Tracked in [issue #338](https://github.com/sganggs/Stronghold-Protocol/issues/338):
+
+- **The trigger.** `onDisconnect` starts a `TAKEOVER_GRACE_MS` (20 s of match time) timer; `onReconnect` cancels it. A
+  seat that reconnects in time, a seat on AI 托管, a departed seat and a match with fewer than two online players
+  never reach the room.
+- **Who votes.** The room's online player seats *and* its spectator seats (`takeoverVoters` reads `this.spectators`,
+  which the lobby fills through `addSpectator`) — a player who came in to watch has a say. The disconnected seat's
+  owner is excluded: their own seat is decided by the others.
+- **Who may take the seat.** Online, not on AI 托管 and not the owner (`takeoverCandidates`) — "有余力" means a
+  player who is not already delegating their own seat.
+- **The tally.** A vote needs `floor(voters / 2) + 1`; the two options are mutually exclusive, so a second vote from
+  the same player withdraws the first one and they may change their mind. The vote opens with the first ballot and
+  closes the moment one side reaches the threshold (`TAKEOVER_VOTE_MS` is the ceiling before the server drops it).
+- **The outcome.** `bot` sets `autoplay` on the seat — the same path a disconnected seat is simulated by, so the
+  lineup on the board never changes. `handover` names the teammate who takes the seat and hands it to them. Both
+  outcomes go through the ticker at `FLOW_TICKER_PRIORITY`.
+- **The wire.** `m.public` carries `takeoverPending` (the prompt: the seat, its owner, the candidates, the voters)
+  and `takeoverVote` (the tally: each side's count, its voter ids, the candidate, the threshold) — both absent when
+  there is no decision, so a normal `m.public` stays byte-identical. `g.takeoverVote { targetPlayerId, mode,
+  candidatePlayerId? }` is the only client→match intent, and `platform.js` lets a spectator seat send it (every other
+  intent stays spectate-only).
+
+The overlay (`public/js/ui/takeover.js`, `TakeoverHost`) is mounted over any route in `main.js`, because a seat may
+drop in any phase. It renders nothing while neither `takeoverPending` nor `takeoverVote` is present.
+
+---
+
 ## 16. Operator loadout: skill & module selection (v2.1, user playtest #1)
 
 Official rule (bwiki 盟约, 更新公告 5114): before a match the player cannot change an operator's tier, but can change the **equipped skill and module** of each chess; some non-default choices are stronger. Scope in the remake (no accounts ⇒ everything the chess's status unlocks is selectable):

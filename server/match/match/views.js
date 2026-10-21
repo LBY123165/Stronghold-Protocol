@@ -87,6 +87,10 @@ export class MatchViews {
         voters: this.setupVote.voters.slice(),
         agreed: [...this.setupVote.agreed],
       } : null,
+      // 断线接管投票 (GitHub #338 follow-up): the open vote about a disconnected seat, and the seat that waits
+      // for the room's decision. Absent when there is none, so a normal m.public stays identical.
+      ...(this.takeoverVote ? { takeoverVote: this.takeoverVoteView() } : {}),
+      ...(this.takeoverPending ? { takeoverPending: this.takeoverPendingView() } : {}),
       factions: this.factions.slice(),
       disabledBonds: [...new Set([...this.disabledBonds, ...this.staticInactiveBonds])].sort(),
       drawnDisabledBonds: this.disabledBonds.slice(),

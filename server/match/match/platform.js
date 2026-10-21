@@ -40,7 +40,7 @@ export class MatchPlatform {
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     // a spectator seat only watches (the platform routes nothing else of it)
-    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
+    if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.takeoverVote'))) {
       // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
       if (this.test && msg?.t === 'g.test') {
         let res;
@@ -144,6 +144,8 @@ export class MatchPlatform {
       else if (this.clientCombat) this._authorityLost(ps, 'disconnect');
       // a rehearsal this host was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
+      // 断线接管: the room decides how this seat is filled, unless the player comes back in time
+      this.scheduleTakeover(playerId);
       this.markPublic();
     });
   }
@@ -156,6 +158,8 @@ export class MatchPlatform {
       ps.connected = true;
       this.refreshDraftPriority(playerId);
       this.refreshUniteSkipVote();
+      // 断线接管: the player is back, so the room is not asked to decide this seat any more
+      this.cancelTakeover(playerId);
       this._resync(ps);
       if (!was) this.markPublic();
     });
@@ -288,6 +292,7 @@ export class MatchPlatform {
     if (typeof this.offersDispose === 'function') { try { this.offersDispose(); } catch { /* ignore */ } }
     for (const h of this._timers) { try { this.sched.clearTimeout(h); } catch { /* ignore */ } }
     this._timers.clear();
+    this._takeoverGrace.clear();
     if (this._pubTimer) { try { this.sched.clearTimeout(this._pubTimer); } catch { /* ignore */ } this._pubTimer = null; }
     this.sched.dispose();
   }

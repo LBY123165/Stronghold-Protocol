@@ -39,6 +39,8 @@ import { useErrorBoundary } from '../vendor/hooks.module.js';
 import { html, UiHosts, Button, MicroLabel, closeAllDialogs } from './ui/components.js';
 import { ConnectionBanner } from './ui/connBanner.js';
 import { EmergencyBanner } from './ui/emergencyBanner.js';
+// 断线接管投票 (GitHub #338 follow-up): an overlay over any route — a seat may drop in any phase
+import { TakeoverHost } from './ui/takeover.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
 import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating, emergencyActive } from './store.js';
@@ -362,6 +364,7 @@ function App() {
     <${TrustedNotice} />
     <${ConnectionBanner} />
     <${EmergencyBanner} />
+    <${TakeoverHost} />
     <${ToastHost} />
     <${UiHosts} />
     <${GuideHost} />

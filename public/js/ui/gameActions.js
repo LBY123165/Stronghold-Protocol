@@ -82,6 +82,9 @@ export const actions = {
   rerollSetup: (setupRevision) => act('room.rerollSetup', { setupRevision }, { sfx: 'confirm' }),
   rerollVote: (voteId, agree) => act('g.rerollVote', { voteId, agree }, { sfx: agree ? 'confirm' : 'back' }),
   cancelReroll: (voteId) => act('room.cancelReroll', { voteId }, { sfx: 'back' }),
+  // 断线接管投票 (GitHub #338 follow-up): fill a disconnected seat with an AI, or let a teammate step into it
+  takeoverVote: (targetPlayerId, mode, candidatePlayerId = null) =>
+    act('g.takeoverVote', { targetPlayerId, mode, candidatePlayerId }, { sfx: 'confirm' }),
   band: (bandId, opts = {}) => act('g.band', { bandId, ...draftRequestScope(opts) }),
   bandSkip: (opts = {}) => act('g.bandSkip', draftRequestScope(opts)),
   buy: (slot) => act('g.buy', { slot }),
