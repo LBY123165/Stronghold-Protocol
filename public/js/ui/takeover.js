@@ -26,6 +26,15 @@ export function canVoteAs(voters, myId, online) {
   return !!myId && !!online && voters.includes(myId);
 }
 
+/**
+ * Whether this player holds a seat in the match. A spectator seat that came in from outside does not: the
+ * decision belongs to the players taking part, so the overlay is not shown to it at all.
+ */
+export function isInMatchSeats(players, myId) {
+  if (!myId) return false;
+  return (players || []).some((p) => p.playerId === myId);
+}
+
 /** One side of the tally: its count, who is on it, whether it has won, and whether it is the own ballot. */
 export function tallyOf(vote, index, myId = null) {
   const option = vote.options[index];
@@ -88,8 +97,12 @@ export function TakeoverHost() {
   const voters = votersOf(vote, pending.voters);
   const canVote = canVoteAs(voters, myId, online);
   const nameOf = (id) => pub?.players?.find((p) => p.playerId === id)?.name || id;
+  // A spectator seat that came in from outside only watches: the decision belongs to the players in this match,
+  // so the overlay is not shown to it at all.
+  const inMatch = isInMatchSeats(pub?.players, myId);
+  if (!inMatch) return null;
   const note = !online ? t('连接断开，暂时无法投票。')
-    : !voters.includes(myId) ? t('你不是本房间的在线玩家，无法参与该决定。') : null;
+    : !canVote ? t('你不在这局的对局席位里，无法参与该决定。') : null;
   const voterRow = html`<div class="takeover__voters">${voters.map((id) => html`<span key=${id}>${nameOf(id)}<//>`)}<//>`;
 
   // the prompt: nobody answered yet, so the room is asked how the seat is filled

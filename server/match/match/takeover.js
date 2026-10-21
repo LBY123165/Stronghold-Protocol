@@ -1,7 +1,8 @@
 // 断线接管投票 (GitHub #338 follow-up): a teammate's seat is disconnected and its player is not on AI control.
 // The other players of the room decide how the seat is filled: an AI takes it over, or another teammate with
-// spare capacity steps into it. The decision is a vote of the room's online players (the player seats and the
-// spectator seats alike), so a player who came in to watch can have a say.
+// spare capacity steps into it. The decision is a vote of the players in this match — the seats taking part,
+// eliminated ones included. A spectator seat that came in from outside only watches: it has no say in the
+// team's seats.
 //
 // [ASSUMED] Remake convenience: the vote needs a majority of the room's online players, the two options are
 // mutually exclusive, and the vote closes as soon as one of them has the majority. These are not official mode
@@ -75,24 +76,24 @@ export class MatchTakeover {
    */
   takeoverVoters() {
     const voters = [];
+    // Only the seats in this match vote — the players taking part, eliminated ones included (a player who died
+    // still belongs to the team and has a say). A spectator seat that came in from outside does not: it watches.
     for (const ps of this.humans()) {
       if (!ps.connected || ps.left) continue;
       voters.push(ps.playerId);
-    }
-    for (const s of this.spectators.values()) {
-      if (!s || s.left || !s.connected) continue;
-      if (!voters.includes(s.playerId)) voters.push(s.playerId);
     }
     return voters;
   }
 
   /**
-   * The teammates who could step into the seat: online, not on AI control and not the seat's owner. A player
-   * who is already in the match keeps their own seat; stepping in is only offered to a player with spare
-   * capacity, so a player who is on AI control (托管) is not asked.
+   * The teammates who could step into the seat: online, still in the match (an eliminated player has no board to
+   * take over with), not on AI control and not the seat's owner. A player who is already in the match keeps their
+   * own seat; stepping in is only offered to a player with spare capacity, so a player who is on AI control
+   * (托管) is not asked.
    */
   takeoverCandidates(targetPlayerId) {
-    return this.humans().filter((ps) => ps.playerId !== targetPlayerId && ps.connected && !ps.left && !ps.autoplay);
+    return this.humans().filter((ps) => ps.playerId !== targetPlayerId && ps.connected && !ps.left && !ps.autoplay
+      && ps.alive !== false);
   }
 
   /**
@@ -160,6 +161,8 @@ export class MatchTakeover {
   voteTakeover(ps, { targetPlayerId, mode, candidatePlayerId } = {}) {
     if (this.disposed || this.ended) return fail(ERR.WRONG_PHASE);
     if (!ps || ps.isBot || ps.left || !ps.connected) return fail(ERR.NOT_IN_ROOM);
+    // a spectator seat only watches: the decision belongs to the players in this match
+    if (ps.spectator) return fail(ERR.NOT_IN_ROOM, 'spectators do not vote');
     const target = this.players.get(targetPlayerId);
     if (!target || target.isBot || target.left) return fail(ERR.BAD_TARGET, 'no such seat');
     if (target.connected) return fail(ERR.BAD_TARGET, 'that seat is connected');

@@ -59,20 +59,40 @@ test('the disconnected player cannot decide their own seat', (t) => {
   assert.equal(res.error, ERR.NOT_IN_ROOM);
 });
 
-test('a spectator seat may vote too', (t) => {
+test('a spectator seat does not vote: the decision belongs to the players in this match', (t) => {
   const h = setup(t);
   const m = h.m;
   dropOut(h);
   // a spectator joined the room (the lobby registers it on the match)
   m.spectators.set('p_spec', Object.freeze({ playerId: 'p_spec', isBot: false, left: false, alive: false, connected: true, spectator: true }));
-  assert.deepEqual(m.takeoverVoters(), ['p_0', 'p_2', 'p_spec']);
+  assert.deepEqual(m.takeoverVoters(), ['p_0', 'p_2'], 'a spectator is not a voter');
 
-  // three voters, one vote is not the majority (two are)
-  assert.equal(m.handle('p_spec', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
-  assert.ok(m.takeoverVote, 'the vote is still open');
-  assert.equal(m.publicView().takeoverVote.needed, 2, 'two of the three voters decide');
+  // the spectator's own ballot is refused (the platform turns a spectator's non-watch intent away)
+  const refused = m.handle('p_spec', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' });
+  assert.equal(refused.error, ERR.SPECTATOR);
+  assert.equal(m.takeoverVote, null, 'no tally was opened');
+
+  // the two players in the match decide it
   assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  assert.equal(m.publicView().takeoverVote.needed, 2, 'two of the two voters decide');
+  assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
   assert.equal(m.takeoverVote, null, 'the second vote is the majority');
+  assert.equal(m.players.get('p_1').autoplay, true);
+});
+
+test('an eliminated player still votes: it is still a seat in this match', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  dropOut(h);
+  // p_2 was eliminated in the fight but is still seated and connected
+  m.players.get('p_2').alive = false;
+  assert.deepEqual(m.takeoverVoters(), ['p_0', 'p_2'], 'an eliminated player keeps its say');
+
+  // an eliminated player cannot step into another seat (it has no board to take over with)
+  assert.deepEqual(m.takeoverCandidates('p_1').map((p) => p.playerId), ['p_0']);
+
+  assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
   assert.equal(m.players.get('p_1').autoplay, true);
 });
 

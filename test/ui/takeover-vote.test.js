@@ -2,7 +2,7 @@
 // only the options the server published, and only to a voter. Pure view helpers, no browser and no port.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { majorityNeeded, votersOf, canVoteAs, tallyOf, promptOptions } from '../../public/js/ui/takeover.js';
+import { majorityNeeded, votersOf, canVoteAs, isInMatchSeats, tallyOf, promptOptions } from '../../public/js/ui/takeover.js';
 import { validateC2S } from '../../shared/protocol.js';
 
 test('the vote needs more than half of the room\'s online players', () => {
@@ -24,6 +24,14 @@ test('canVoteAs: only a voter, only online, and never without an identity', () =
   assert.equal(canVoteAs(['p_0', 'p_1'], 'p_9', true), false, 'an outsider does not vote');
   assert.equal(canVoteAs(['p_0'], 'p_0', false), false, 'offline: the button is disabled');
   assert.equal(canVoteAs(['p_0'], null, true), false, 'no identity yet');
+});
+
+test('isInMatchSeats: a seat in this match counts, a spectator seat does not', () => {
+  const players = [{ playerId: 'p_0', name: '甲' }, { playerId: 'p_1', name: '乙' }];
+  assert.equal(isInMatchSeats(players, 'p_0'), true, 'a player in the match');
+  assert.equal(isInMatchSeats(players, 'p_spec'), false, 'a spectator seat that came in from outside');
+  assert.equal(isInMatchSeats(players, null), false, 'no identity yet');
+  assert.equal(isInMatchSeats(undefined, 'p_0'), false, 'no player list yet');
 });
 
 test('tallyOf: each side\'s count, its voters and whether it has won', () => {

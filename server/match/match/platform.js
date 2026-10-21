@@ -40,7 +40,7 @@ export class MatchPlatform {
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
     // a spectator seat only watches (the platform routes nothing else of it)
-    if (ps.spectator && (!msg || (msg.t !== 'g.watch' && msg.t !== 'g.takeoverVote'))) {
+    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
       // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
       if (this.test && msg?.t === 'g.test') {
         let res;

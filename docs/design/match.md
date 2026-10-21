@@ -158,11 +158,12 @@ Tracked in [issue #338](https://github.com/sganggs/Stronghold-Protocol/issues/33
 - **The trigger.** `onDisconnect` starts a `TAKEOVER_GRACE_MS` (20 s of match time) timer; `onReconnect` cancels it. A
   seat that reconnects in time, a seat on AI 托管, a departed seat and a match with fewer than two online players
   never reach the room.
-- **Who votes.** The room's online player seats *and* its spectator seats (`takeoverVoters` reads `this.spectators`,
-  which the lobby fills through `addSpectator`) — a player who came in to watch has a say. The disconnected seat's
-  owner is excluded: their own seat is decided by the others.
-- **Who may take the seat.** Online, not on AI 托管 and not the owner (`takeoverCandidates`) — "有余力" means a
-  player who is not already delegating their own seat.
+- **Who votes.** The seats taking part in this match (`takeoverVoters` reads `this.humans()`), **eliminated players
+  included** — a player who died still belongs to the team and has a say. A spectator seat that came in from outside
+  does **not** vote: it watches, and `platform.js` turns its `g.takeoverVote` away with `SPECTATOR`. The disconnected
+  seat's owner is excluded: their own seat is decided by the others.
+- **Who may take the seat.** Online, still alive (an eliminated player has no board to take over with), not on AI 托管
+  and not the owner (`takeoverCandidates`) — "有余力" means a player who is not already delegating their own seat.
 - **The tally.** A vote needs `floor(voters / 2) + 1`; the two options are mutually exclusive, so a second vote from
   the same player withdraws the first one and they may change their mind. The vote opens with the first ballot and
   closes the moment one side reaches the threshold (`TAKEOVER_VOTE_MS` is the ceiling before the server drops it).
@@ -172,8 +173,8 @@ Tracked in [issue #338](https://github.com/sganggs/Stronghold-Protocol/issues/33
 - **The wire.** `m.public` carries `takeoverPending` (the prompt: the seat, its owner, the candidates, the voters)
   and `takeoverVote` (the tally: each side's count, its voter ids, the candidate, the threshold) — both absent when
   there is no decision, so a normal `m.public` stays byte-identical. `g.takeoverVote { targetPlayerId, mode,
-  candidatePlayerId? }` is the only client→match intent, and `platform.js` lets a spectator seat send it (every other
-  intent stays spectate-only).
+  candidatePlayerId? }` is the only client→match intent, and it is a player-seat intent only (a spectator seat's
+  ballot is refused with `SPECTATOR`, like every other intent it may not send).
 
 The overlay (`public/js/ui/takeover.js`, `TakeoverHost`) is mounted over any route in `main.js`, because a seat may
 drop in any phase. It renders nothing while neither `takeoverPending` nor `takeoverVote` is present.
