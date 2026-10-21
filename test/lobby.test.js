@@ -879,13 +879,14 @@ describe('websocket lobby', () => {
     await expectOk(host, { t: 'room.leave' });
     const migrated = await a.waitFor('room.state', (s) => s.hostId !== host.id);
     assert.equal(migrated.hostId, a.id, 'lowest remaining seat becomes host');
-    assert.equal(migrated.seats[0], null);
+    assert.equal(migrated.seats[0].playerId, a.id, 'the migrated host is promoted to seat 0 (host transfer/migration swaps the host and seat 0)');
+    assert.equal(migrated.seats[1], null, 'A vacated its old seat');
     await b.waitFor('room.state', (s) => s.hostId === a.id);
 
-    // new joiner takes the lowest free seat (0); host stays with A
+    // new joiner takes the lowest free seat (1); the host A now sits at seat 0
     const c = await pool.player('C');
     const joined = await joinRoom(c, st.code);
-    assert.equal(seatOf(joined, c.id).seat, 0);
+    assert.equal(seatOf(joined, c.id).seat, 1);
     assert.equal(joined.hostId, a.id);
     await expectOk(a, { t: 'room.addBot' });
     const withBot = await c.waitFor('room.state', (s) => s.seats[3]?.isBot);
@@ -1332,7 +1333,7 @@ describe('lobby timers and match interface', () => {
     await joinRoom(guest, st.code);
     await host.terminate();
     const migrated = await guest.waitFor('room.state', (s) => s.hostId === guest.id, GRACE + 1000);
-    assert.equal(migrated.seats[0], null);
+    assert.equal(migrated.seats[0].playerId, guest.id, 'the migrated host is promoted to seat 0');
     await expectOk(guest, { t: 'room.addBot' });
   });
 
