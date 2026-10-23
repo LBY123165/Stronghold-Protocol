@@ -9,6 +9,12 @@ server installation (the systemd unit's persistent, writable directory). A store
 with the server's other private data. Account bearer tokens are stored hashed in
 the same file and expire after one year; signing in issues a new token. There is no password reset flow.
 
+To merge an older installation's store (for example a backup at
+`/opt/stronghold-qb/.cache/accounts.json`) into the live one, stop the service and run
+`node tools/accounts-import.mjs <old-accounts.json>` (target defaults to `runtime/accounts.json`). Existing accounts
+keep their current password, ban state and tokens; appearances only in the old store are restored, and accounts only in
+the old store are added. The target is backed up beside itself first. Use `--dry-run` to preview the counts.
+
 An account token is sent only in the WebSocket hello. When a device signs into an account that still has a recoverable
 server session, the server transfers that session to the new socket and resends its room or match state. The previous
 socket is disconnected. The existing reconnect windows still apply after the socket is lost: 10 minutes for co-op and
