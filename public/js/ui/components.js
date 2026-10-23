@@ -410,6 +410,9 @@ export function Modal({ open, title, micro, tone = 'mint', onClose, actions, wid
     if (!open) return undefined;
     const token = {};
     modalStack.push(token);
+    // A modal opened while the portrait rotate hint is up stays usable (announcement close, settings, …). The hint
+    // returns as soon as the last modal closes; `modalStack` already counts nested dialogs.
+    if (typeof document !== 'undefined') document.documentElement.classList.add('sp-modal-open');
     const prevFocus = typeof document !== 'undefined' ? document.activeElement : null;
     const box = boxRef.current;
     // The independent guide can open above SettingsModal (its z-index is higher than --z-modal).
@@ -448,6 +451,7 @@ export function Modal({ open, title, micro, tone = 'mint', onClose, actions, wid
       window.removeEventListener('focusin', onFocus);
       const i = modalStack.indexOf(token);
       if (i >= 0) modalStack.splice(i, 1);
+      if (typeof document !== 'undefined' && !modalStack.length) document.documentElement.classList.remove('sp-modal-open');
       prevFocus?.focus?.();
     };
   }, [open]);

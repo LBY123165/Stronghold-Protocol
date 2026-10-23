@@ -65,7 +65,13 @@
 
 /* Small screens show one scroll region at a time. Controls remain visible above and below the reader. */
 @media (max-width: 900px) {
-  .modal__box.announcements { width: 96vw; height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px)); max-height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px)); }
+  .modal__box.announcements {
+    width: 96vw;
+    height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+    height: calc(100svh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+    max-height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+    max-height: calc(100svh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+  }
   .announcements > .modal__head { padding: .14rem .2rem .1rem; }
   .announcements > .modal__actions { padding: .12rem .18rem; gap: .12rem; flex-wrap: wrap; }
   .announcements__layout { display: flex; flex-direction: column; }
@@ -79,7 +85,7 @@
   .announcements__footer-buttons { margin-left: auto; }
 }
 @media (max-height: 480px) {
-  .modal__box.announcements { height: 94vh; max-height: 94vh; }
+  .modal__box.announcements { height: 94vh; height: 94svh; max-height: 94vh; max-height: 94svh; }
   .announcements > .modal__head { padding-top: .1rem; padding-bottom: .08rem; }
   .announcements > .modal__head .micro { display: none; }
   .announcements > .modal__actions { padding-top: .09rem; padding-bottom: .09rem; }
@@ -102,7 +108,13 @@
 .urgent-announcement__body { flex: 1; min-height: 0; overflow: auto; padding: .22rem .28rem .3rem; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .urgent-announcement__pending { color: var(--text-lo); font-size: max(calc(.14 * var(--t)), 12px); line-height: 1.5; }
 @media (max-width: 900px) {
-  .modal__box.urgent-announcement { width: 96vw; height: 92vh; max-height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px)); }
+  .modal__box.urgent-announcement {
+    width: 96vw;
+    height: 92vh;
+    height: 92svh;
+    max-height: calc(100vh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+    max-height: calc(100svh - .35rem - var(--sa-t, 0px) - var(--sa-b, 0px));
+  }
   .urgent-announcement > .modal__head { padding: .14rem .2rem .1rem; }
   .urgent-announcement__article-head { padding: .12rem .2rem; }
   .urgent-announcement__running { padding: .09rem .2rem; }
@@ -110,7 +122,7 @@
   .urgent-announcement > .modal__actions { padding: .12rem .18rem; }
 }
 @media (max-height: 480px) {
-  .modal__box.urgent-announcement { height: 94vh; max-height: 94vh; }
+  .modal__box.urgent-announcement { height: 94vh; height: 94svh; max-height: 94vh; max-height: 94svh; }
   .urgent-announcement > .modal__head { padding-top: .1rem; padding-bottom: .08rem; }
   .urgent-announcement > .modal__head .micro { display: none; }
   .urgent-announcement > .modal__actions { padding-top: .09rem; padding-bottom: .09rem; }

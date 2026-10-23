@@ -351,6 +351,9 @@ h1, h2, h3, h4, p { margin: 0; }
   color: var(--text-md);
   font-size: 16px;
 }
+/* A dialog opened in portrait (announcement confirmation, settings, …) must be readable and tappable: the
+   rotate hint yields while any Modal is open and returns after the last one closes (components.js). */
+html.sp-modal-open .rotate-hint { display: none !important; }
 .rotate-hint__phone {
   width: 54px;
   height: 90px;
