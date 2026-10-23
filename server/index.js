@@ -135,8 +135,13 @@ export async function startServer(opts = {}) {
   // changes (applySettings below is hoisted; it runs only once the lobby and the asset cache exist)
   const serverSettings = createServerSettings({ dir: opts.serverSettingsDir, root: ROOT, log,
     onChange: (next) => applySettings(next) });
-  // 账号 (docs/ACCOUNT.md): registered players, their loadouts and cosmetics synced across devices
-  const accounts = createAccountStore({ file: opts.accountsFile || path.join(ROOT, '.cache', 'accounts.json'), log });
+  // 账号 (docs/ACCOUNT.md): registered players, their loadouts and cosmetics synced across devices.
+  // The store belongs in runtime/ (the systemd unit's persistent writable directory), not .cache/ (disposable).
+  const accounts = createAccountStore({
+    file: opts.accountsFile || path.join(ROOT, 'runtime', 'accounts.json'),
+    legacyFile: opts.accountsFile ? null : path.join(ROOT, '.cache', 'accounts.json'),
+    log,
+  });
   await accounts.ready;
   // 公告 (docs/ANNOUNCEMENTS.md): the served notices (their live push starts once the network exists)
   const announcements = createAnnouncementStore({ dir: opts.announcementsDir, root: ROOT, log });

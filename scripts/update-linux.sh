@@ -31,6 +31,16 @@ else
   say "git             : 不是 git 仓库，跳过（你自己用 rsync/scp 同步代码）"
 fi
 
+# ---- 1.5 账号库迁移（0.3.1 的 .cache → runtime）--------------------------------------------------
+# `.cache/` 是可清理的缓存目录；账号、皮肤选择、令牌必须放在 runtime/。首次更新时先把旧库搬到
+# runtime/，服务端启动时也会做同样的迁移（见 server/accounts.js），这里提前复制可防止依赖安装
+# 或更新脚本清掉 .cache/。
+if [ -f .cache/accounts.json ] && [ ! -f runtime/accounts.json ]; then
+  mkdir -p runtime
+  cp -p .cache/accounts.json runtime/accounts.json
+  say "账号数据        : .cache/accounts.json -> runtime/accounts.json（一次性迁移）"
+fi
+
 # ---- 2. 依赖 -----------------------------------------------------------------------------------
 say "依赖            : npm ci --omit=dev"
 npm ci --omit=dev --no-audit --no-fund --ignore-scripts

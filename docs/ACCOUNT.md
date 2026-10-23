@@ -3,8 +3,10 @@
 The title screen supports account registration and sign-in. Usernames are case-insensitive, 3–24 Unicode letters,
 combining marks, or numbers, optionally including `_`, `.` or `-`; each name must include at least one letter or number.
 Passwords are 8–128 characters. The server stores a per-account random salt and a scrypt
-password hash, never the password. Account records and skin preferences are written to `.cache/accounts.json` in the
-server installation. Back up that file with the server's other private data. Account bearer tokens are stored hashed in
+password hash, never the password. Account records and skin preferences are written to `runtime/accounts.json` in the
+server installation (the systemd unit's persistent, writable directory). A store still in the old
+`.cache/accounts.json` location is copied to `runtime/accounts.json` once on the next start or update. Back up that file
+with the server's other private data. Account bearer tokens are stored hashed in
 the same file and expire after one year; signing in issues a new token. There is no password reset flow.
 
 An account token is sent only in the WebSocket hello. When a device signs into an account that still has a recoverable

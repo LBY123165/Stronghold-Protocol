@@ -182,7 +182,13 @@ const pluginCount = (content) => (content && Number.isInteger(content.plugins) &
 
 function onWelcome(msg) {
   onEmergency(msg.emergency);
-  if (msg.accountSkins && typeof msg.accountSkins === 'object' && !Array.isArray(msg.accountSkins)) setSkins(msg.accountSkins);
+  // An EMPTY account map must not erase this browser's choices: a fresh account, or an account store that has just
+  // moved/was unavailable, would otherwise wipe every selected skin on the next login. A non-empty account map is
+  // still authoritative (cross-device sync).
+  const savedSkins = msg.accountSkins;
+  if (savedSkins && typeof savedSkins === 'object' && !Array.isArray(savedSkins) && Object.keys(savedSkins).length) {
+    setSkins(savedSkins);
+  }
   identity.saveToken(msg.token);
   identity.rememberMatch(null);
   const prev = store.get();

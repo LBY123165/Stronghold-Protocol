@@ -14,18 +14,31 @@ const hash = (s) => createHash('sha256').update(s).digest('hex');
 export function validAccountName(v) { return normalizeAccountName(v) !== null; }
 export function validPassword(v) { return typeof v === 'string' && v.length >= PASS_MIN && v.length <= PASS_MAX; }
 
-export function createAccountStore({ file, log = console } = {}) {
-  const filePath = file || path.resolve('.cache/accounts.json');
+export function createAccountStore({ file, legacyFile = null, log = console } = {}) {
+  const filePath = file || path.resolve('runtime/accounts.json');
+  const legacyPath = legacyFile && path.resolve(legacyFile) !== path.resolve(filePath) ? legacyFile : null;
   const accounts = new Map();
   let writeQueue = Promise.resolve();
   let mutationQueue = Promise.resolve();
-  const ready = (async () => {
+  async function load(from) {
     try {
-      const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
+      const raw = JSON.parse(await fs.readFile(from, 'utf8'));
       for (const [key, value] of Object.entries(raw.accounts || {})) accounts.set(key, value);
+      return true;
     } catch (e) {
-      if (e.code !== 'ENOENT') { log.error?.(`[accounts] cannot read store: ${e.message}`); throw e; }
+      if (e.code === 'ENOENT') return false;
+      log.error?.(`[accounts] cannot read store: ${e.message}`);
+      throw e;
     }
+  }
+  const ready = (async () => {
+    if (await load(filePath)) return;
+    // One-time move from the 0.3.1 location. `.cache/` is a disposable cache directory: a deploy or a cleanup may
+    // remove it, which is why account skins vanished after a server update. `runtime/` is the persistent, writable
+    // directory of the systemd unit; the first start copies the old store there and later starts never look back.
+    if (!legacyPath || !(await load(legacyPath))) return;
+    await persist();
+    log.info?.(`[accounts] migrated ${legacyPath} -> ${filePath}`);
   })();
   async function persist() {
     const data = JSON.stringify({ version: 1, accounts: Object.fromEntries(accounts) });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createAccountStore, validAccountName } from '../server/accounts.js';
@@ -37,4 +37,30 @@ test('account credentials, session token, and skins persist across store reloads
   assert.deepEqual(login.skins, skins);
   assert.equal((await second.authenticate(created.token)).username, '清歌梶耳');
   assert.equal((await second.authenticate(login.token)).username, '清歌梶耳');
+});
+
+test('a legacy .cache store is migrated once to the persistent runtime directory', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'stronghold-accounts-migrate-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const legacy = path.join(dir, '.cache', 'accounts.json');
+  const runtime = path.join(dir, 'runtime', 'accounts.json');
+  const first = createAccountStore({ file: legacy });
+  await first.ready;
+  const created = await first.create('迁移玩家', 'password-123');
+  assert.equal(created.error, undefined);
+  const skins = { char_1012_skadi: 'char_1012_skadi_2' };
+  const account = await first.authenticate(created.token);
+  assert.equal(await first.setSkins(account.id, skins), true);
+
+  const second = createAccountStore({ file: runtime, legacyFile: legacy });
+  await second.ready;
+  const login = await second.login('迁移玩家', 'password-123');
+  assert.deepEqual(login.skins, skins);
+  const written = JSON.parse(await readFile(runtime, 'utf8'));
+  assert.equal(Object.keys(written.accounts).length, 1);
+
+  // once the runtime store exists, a stale legacy file is ignored
+  const third = createAccountStore({ file: runtime, legacyFile: legacy });
+  await third.ready;
+  assert.deepEqual((await third.login('迁移玩家', 'password-123')).skins, skins);
 });
