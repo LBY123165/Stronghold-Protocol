@@ -78,7 +78,7 @@ export const emptyMatch = () => ({ public: null, private: null, field: null, res
 export const initialState = Object.freeze({
   connection: { status: 'idle', ping: null, attempt: 0, retryAt: 0, lastError: null, everOnline: false },
   emergency: /** @type {any} */ (null),
-  me: { playerId: null, name: '', token: null },
+  me: { playerId: null, name: '', token: null, control: { active: null, seats: [] } },
   content: null,
   // how many unofficial plugins the server has (DESIGN §32 P1a: /healthz or welcome `content.plugins`; content.js)
   installedPlugins: 0,
@@ -94,6 +94,13 @@ export const initialState = Object.freeze({
   clock: { offset: 0, rtt: null, synced: false },
   ui: { pendingJoin: null, restoring: false, buildStale: false },
 });
+
+/**
+ * The seat on screen: a handed-over seat when this client shows one (断线接管), else its own player id.
+ * Voting, host rights and chat stay with `me.playerId`; gameplay and own-seat views use this.
+ * @param {any} s app state
+ */
+export const activeSeatId = (s) => s?.me?.control?.active || s?.me?.playerId || null;
 
 /** The app-wide store singleton. */
 export const store = createStore(initialState);

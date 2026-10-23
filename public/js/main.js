@@ -43,7 +43,7 @@ import { EmergencyBanner } from './ui/emergencyBanner.js';
 import { TakeoverHost } from './ui/takeover.js';
 import { ToastHost, toast, toastError, describeError } from './ui/toasts.js';
 import { net, identity, NetError } from './net.js';
-import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating, emergencyActive } from './store.js';
+import { store, useStore, emptyMatch, selectRoute, sessionResetNotice, isSpectating, emergencyActive, activeSeatId } from './store.js';
 import { data } from './data.js';
 import { GAME_FILES } from './ui/gameComponents.js';
 import { TitleScreen, sanitizeName } from './screens/title.js';
@@ -189,8 +189,11 @@ function onWelcome(msg) {
   const prevId = prev.me.playerId;
   const name = typeof msg.name === 'string' && msg.name ? msg.name : prev.me.name;
   identity.saveName(name);
+  // a same-session reconnect keeps the handed-over seat on screen; a brand-new session has none
+  const control = prevId != null && prevId === msg.playerId && prev.me.control
+    ? prev.me.control : { active: null, seats: [] };
   store.set({
-    me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null },
+    me: { playerId: msg.playerId ?? null, name, token: typeof msg.token === 'string' ? msg.token : null, control },
     // the server's content identity (DESIGN §32): the diagnostics name it (diag.js contentLine)
     content: msg.content && typeof msg.content.vanilla === 'string' ? { vanilla: msg.content.vanilla } : null,
     // how many unofficial plugins it has (P1a — absent: none; content.js fetches the catalogue only when there are some)
@@ -279,9 +282,18 @@ function wireNet() {
   net.on('m.public', (msg) => { matchAt = Date.now(); store.patch('match', { public: payload(msg) }); maybeFinishRestore(); });
   net.on('m.emergency', onEmergency);
   net.on('m.private', (msg) => { matchAt = Date.now(); store.patch('match', { private: payload(msg) }); });
+  // 断线接管: the seats this client may control and the one on screen
+  net.on('m.control', (msg) => {
+    const active = typeof msg.active === 'string' ? msg.active : null;
+    const seats = Array.isArray(msg.seats)
+      ? msg.seats.filter((s) => s && typeof s.playerId === 'string')
+        .map((s) => ({ playerId: s.playerId, name: typeof s.name === 'string' ? s.name : s.playerId }))
+      : [];
+    store.patch('me', { control: { active, seats } });
+  });
   net.on('m.layer', (msg) => {
     const s = store.get();
-    if (selectRoute(s) === 'game' && msg.playerId === s.me?.playerId) audio.layerGain(msg.bondId, msg.add);
+    if (selectRoute(s) === 'game' && msg.playerId === activeSeatId(s)) audio.layerGain(msg.bondId, msg.add);
   });
   net.on('m.field', (msg) => store.patch('match', { field: payload(msg) }));
   net.on('m.result', (msg) => {
@@ -291,7 +303,7 @@ function wireNet() {
     // replays dedupe by content id inside recordResult (spectator seats' copies build no record at all)
     // (`vs`: the room's cosmetic plugins, recorded — such a match still counts as the original game: ui/stats.js)
     // (`content`: the room's content set when it played gameplay plugins — such a match is unofficial: ui/stats.js)
-    if (store.get().room?.test !== true && store.get().match.public?.test !== true) recordResult(res, { myId: store.get().me.playerId, roomMode: store.get().room?.mode ?? null, vs: store.get().room?.content?.vs ?? null, content: store.get().room?.content ?? null, now: Date.now() });
+    if (store.get().room?.test !== true && store.get().match.public?.test !== true) recordResult(res, { myId: activeSeatId(store.get()), roomMode: store.get().room?.mode ?? null, vs: store.get().room?.content?.vs ?? null, content: store.get().room?.content ?? null, now: Date.now() });
   });
   net.on('m.toast', (msg) => {
     const kind = ['info', 'success', 'warn', 'error'].includes(msg.kind) ? msg.kind : 'info';
@@ -322,7 +334,11 @@ function wireNet() {
     if (s.room && !prev.room) warmGameData();
     // the match on screen is over (left, closed, kicked, a new session): a rehearsal task of it is dead, and the frame
     // that cancels it may never arrive (a disposed match sends nothing) — the page stops what it is running itself
-    if (selectRoute(prev) === 'game' && selectRoute(s) !== 'game') rehearsal?.clear();
+    if (selectRoute(prev) === 'game' && selectRoute(s) !== 'game') {
+      rehearsal?.clear();
+      // 断线接管: the seat tabs belong to the match that just ended
+      if (s.me.control?.seats?.length || s.me.control?.active) store.patch('me', { control: { active: null, seats: [] } });
+    }
   });
 }
 

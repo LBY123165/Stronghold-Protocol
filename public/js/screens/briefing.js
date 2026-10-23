@@ -17,7 +17,7 @@ import { MatchChatButton } from '../ui/matchChat.js';
 import { actions } from '../ui/gameActions.js';
 import { factionTypes, sortedPlayers, phaseTotalSeconds } from '../ui/gameLogic.js';
 import { enemyIconUrl, factionIconUrl } from '../ui/assetUrls.js';
-import { useStore } from '../store.js';
+import { useStore, activeSeatId } from '../store.js';
 import { data } from '../data.js';
 import { t, tParts } from '../../../shared/i18n.js';
 
@@ -27,7 +27,7 @@ const cx = (...p) => p.flat().filter(Boolean).join(' ');
 export function BriefingScreen() {
   const pub = useStore((s) => s.match.public);
   const priv = useStore((s) => s.match.private);
-  const myId = useStore((s) => s.me.playerId);
+  const myId = useStore(activeSeatId);
   const solo = useStore((s) => s.room?.mode === 'solo') || String(pub?.modeId || '').includes('single');
   // gameplay plugins (DESIGN §32.6): the briefing says the match is unofficial
   const room = useStore((s) => s.room);

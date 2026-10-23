@@ -71,7 +71,7 @@ export class MatchTakeover {
    */
   takeoverCandidate() {
     for (const ps of this.humans()) {
-      if (ps.connected || ps.left || ps.autoplay) continue;
+      if (ps.connected || ps.left || ps.autoplay || ps.controlledBy) continue;
       if (this.takeoverVote && this.takeoverVote.targetPlayerId === ps.playerId) continue;
       return ps;
     }
@@ -202,6 +202,7 @@ export class MatchTakeover {
     if (!target || target.isBot || target.left) return fail(ERR.BAD_TARGET, 'no such seat');
     if (target.connected) return fail(ERR.BAD_TARGET, 'that seat is connected');
     if (target.autoplay) return fail(ERR.BAD_TARGET, 'that seat is already on AI control');
+    if (target.controlledBy) return fail(ERR.BAD_TARGET, 'that seat is already controlled');
 
     // checked on every ballot, not only the first one: a seat that dropped after the vote opened is no voter
     const voters = this.takeoverVoters();
@@ -291,13 +292,15 @@ export class MatchTakeover {
   _applyTakeover(vote, winner, { timeout = false } = {}) {
     const target = this.players.get(vote.targetPlayerId);
     if (!target || target.left || target.connected) return;
+    // a seat that was itself controlling other seats gives them back to the AI before its own outcome applies
+    if (target.controlSeats.size) this.releaseOwnedControls(target.playerId);
     if (winner.mode === 'bot') {
       // the seat keeps its lineup; the server takes it over (the same way a disconnected seat is simulated)
       this._takeSeatByAi(target, { timeout });
       return;
     }
-    // a teammate steps into the seat: the seat's player becomes the candidate, and the disconnected player is
-    // out of the match (their lineup stays on the board until the new player's first turn).
+    // a teammate steps into the seat: the candidate controls the disconnected seat as a second seat (its own
+    // seat stays theirs), and the client switches to it. The target's lineup stays on the board.
     const candidate = this.players.get(winner.candidatePlayerId);
     if (!candidate || candidate.left || !candidate.connected) {
       // the named teammate left before the vote closed: fall back to the AI rather than leave the seat hanging
@@ -305,9 +308,64 @@ export class MatchTakeover {
       return;
     }
     target.autoplay = false;
+    target.controlledBy = candidate.playerId;
+    candidate.controlSeats.add(target.playerId);
+    const previous = candidate.activeSeat ? this.players.get(candidate.activeSeat) : candidate;
+    candidate.activeSeat = target.playerId;
+    // the candidate's browser switches away from its previous field: its live battle goes to the server
+    if (this.clientCombat && previous) this._authorityLost(previous, 'control-switch');
     this.refreshDraftPriority(target.playerId);
     this.refreshUniteSkipVote();
     this.markPublic();
+    // the candidate's browser switches to the target seat: m.control + that seat's private / field
+    this._resync(candidate);
     this.tickerText(msg('断线接管：{name} 接替 {name2} 的席位', { name: candidate.name, name2: target.name }), FLOW_TICKER_PRIORITY);
+  }
+
+  /**
+   * A seat came back (or left): its controller gives it up. The controller's client switches back to its own
+   * seat when the released seat was the one on screen.
+   * @param {string} targetId the controlled seat
+   */
+  releaseSeatControl(targetId) {
+    const target = this.players.get(targetId);
+    const ownerId = target?.controlledBy;
+    if (!target || !ownerId) return;
+    target.controlledBy = null;
+    const owner = this.players.get(ownerId);
+    if (owner) {
+      if (owner.activeSeat === targetId && this.clientCombat) this._authorityLost(target, 'control-switch');
+      owner.controlSeats.delete(targetId);
+      if (owner.activeSeat === targetId) owner.activeSeat = null;
+      if (owner.connected && !owner.left) {
+        this._sendControl(owner, { clear: owner.controlSeats.size === 0 });
+        this._resync(owner);
+      }
+    }
+    this.markPublic();
+  }
+
+  /**
+   * A controller leaves (or its seat is taken over): every seat it controlled goes back to the AI, so no seat
+   * is left waiting on a client that is gone. The seats keep their own lineup.
+   * @param {string} ownerId the session that controlled them
+   */
+  releaseOwnedControls(ownerId) {
+    const owner = this.players.get(ownerId);
+    if (!owner || !owner.controlSeats.size) return;
+    for (const targetId of [...owner.controlSeats]) {
+      const target = this.players.get(targetId);
+      if (!target) continue;
+      target.controlledBy = null;
+      if (!target.connected && !target.left) {
+        target.autoplay = true;
+        this.refreshDraftPriority(target.playerId);
+      }
+    }
+    owner.controlSeats.clear();
+    owner.activeSeat = null;
+    if (owner.connected && !owner.left) this._sendControl(owner, { clear: true });
+    this.refreshUniteSkipVote();
+    this.markPublic();
   }
 }

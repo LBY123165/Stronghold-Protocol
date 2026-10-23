@@ -3,7 +3,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { majorityNeeded, votersOf, takeoverVotersOf, canVoteAs, isInMatchSeats, tallyOf, promptOptions } from '../../public/js/ui/takeover.js';
+import { activeSeatId } from '../../public/js/store.js';
 import { validateC2S } from '../../shared/protocol.js';
+
+test('activeSeatId: the handed-over seat on screen, else the client\'s own seat', () => {
+  assert.equal(activeSeatId({ me: { playerId: 'p_0', control: { active: null, seats: [] } } }), 'p_0');
+  assert.equal(activeSeatId({ me: { playerId: 'p_0', control: { active: 'p_1', seats: [{ playerId: 'p_1' }] } } }), 'p_1');
+  assert.equal(activeSeatId({ me: { playerId: 'p_0' } }), 'p_0', 'no control state yet');
+  assert.equal(activeSeatId({}), null);
+});
 
 test('the vote needs more than half of the room\'s online players', () => {
   assert.equal(majorityNeeded(2), 2, 'two voters: one is the majority');
@@ -104,4 +112,8 @@ test('the wire form of a ballot is what the protocol accepts', () => {
   // passes the protocol and is refused by the match, which is what test/match/takeover-vote.test.js asserts
   assert.equal(ok({ t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover' }), true);
   assert.equal(ok({ t: 'g.takeoverVote', targetPlayerId: '', mode: 'bot' }), false, 'the seat id is required');
+  // 断线接管 seat switch: own seat (absent) or one controlled seat
+  assert.equal(ok({ t: 'g.control' }), true, 'absent playerId = own seat');
+  assert.equal(ok({ t: 'g.control', playerId: 'p_1' }), true);
+  assert.equal(ok({ t: 'g.control', playerId: '' }), false, 'an empty id is not a seat');
 });

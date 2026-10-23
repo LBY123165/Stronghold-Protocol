@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { createFallbackView } from './fallbackField.js';
 import { data } from '../data.js';
 import { audio } from '../audio.js';
-import { store } from '../store.js';
+import { store, activeSeatId } from '../store.js';
 import { settingsStore } from './settings.js';
 
 const LOAD_TIMEOUT_MS = 12000;
@@ -292,7 +292,7 @@ export function useFieldView(hostRef) {
         // 设置「显示其他玩家的皮肤」 (docs/SKINS.md) needs to know which pieces are this page's own: the identity is on the
         // app store (`me.playerId`, set by welcome), so the view is told it rather than resolving it per frame. Told
         // before the first board arrives — the mount waits for `enterBattle`/`setPrep`, which the game screen calls after.
-        view.setMe?.(store.get().me?.playerId || null);
+        view.setMe?.(activeSeatId(store.get()) || null);
         view.setSkins?.(store.get().match?.public?.players);
         globalThis.__SP_VIEW__ = view; // dev / E2E introspection (view.raw.stats?.())
         setState({ view, kind: view.kind });
@@ -300,7 +300,7 @@ export function useFieldView(hostRef) {
     const unsub = settingsStore.subscribe((s) => viewRef.current?.setSettings?.(s));
     // room.skins is accepted in every phase: update the current field without restarting its battle runner.
     const unsubSkins = store.subscribe((s, prev) => {
-      if (s.me?.playerId !== prev.me?.playerId) viewRef.current?.setMe?.(s.me?.playerId || null);
+      if (activeSeatId(s) !== activeSeatId(prev)) viewRef.current?.setMe?.(activeSeatId(s) || null);
       if (s.match?.public?.players !== prev.match?.public?.players) viewRef.current?.setSkins?.(s.match?.public?.players);
     });
     const onResize = () => viewRef.current?.resize();

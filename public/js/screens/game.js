@@ -129,7 +129,7 @@ import { BandDraftScreen } from './bandDraft.js';
 import { ResultScreen } from './settle.js';
 import { ProtocolBoot, preloadBootArt, bootArtReady, BOOT_LEAVE_MS } from '../ui/protocolBoot.js';
 import { net } from '../net.js';
-import { store, useStore, shallowEqual, serverNow, isSpectating, emergencyActive, matchClockNow } from '../store.js';
+import { store, useStore, shallowEqual, serverNow, isSpectating, emergencyActive, matchClockNow, activeSeatId } from '../store.js';
 import { battleRunner } from '../battle/runner.js';
 import '../ui/pluginFrame.js';
 import { isClientCombat, observeTarget, teammateProgress, cameraLayers, layerCamera, loneHalf, sidesOf, resumedWatch, followedScout } from '../battle/observe.js';
@@ -154,29 +154,51 @@ if (battleRunner) {
   settingsStore.subscribe(applyCombatMetrics);
 }
 
+/** 断线接管: the seats this client may act for; one tab per seat, the own seat first. Nothing without control. */
+function SeatSwitch() {
+  const me = useStore((s) => s.me);
+  const control = me.control;
+  if (!control || !Array.isArray(control.seats) || !control.seats.length) return null;
+  const active = control.active || me.playerId;
+  return html`<div class="seatswitch" role="tablist" aria-label=${t('接管席位')}>
+    <button type="button" role="tab" aria-selected=${active === me.playerId}
+      class=${'seatswitch__tab' + (active === me.playerId ? ' is-on' : '')}
+      onClick=${() => actions.controlSeat(null)}>${t('我的席位')}</button>
+    ${control.seats.map((seat) => html`<button type="button" role="tab" key=${seat.playerId}
+      aria-selected=${active === seat.playerId}
+      class=${'seatswitch__tab' + (active === seat.playerId ? ' is-on' : '')}
+      title=${t('接管 {name} 的席位', { name: seat.name })}
+      onClick=${() => actions.controlSeat(seat.playerId)}>${seat.name}</button>`)}
+  </div>`;
+}
+
 /** Router for the in-match screens. */
 export function GameScreen() {
   const pub = useStore((s) => s.match.public);
   const hasResult = useStore((s) => !!s.match.result);
   const ended = useStore((s) => !!s.room && !s.room.inMatch && !!s.match.public);
   const away = useStore((s) => s.away, Object.is, awayStore);
-  const autoplay = useStore((s) => !!(Array.isArray(s.match.public?.players) && s.match.public.players.find((p) => p && p.playerId === s.me.playerId)?.autoplay));
+  const activeId = useStore(activeSeatId);
+  const privId = useStore((s) => s.match.private?.playerId ?? null);
+  const autoplay = useStore((s) => !!(Array.isArray(s.match.public?.players)
+    && s.match.public.players.find((p) => p && p.playerId === activeSeatId(s))?.autoplay));
   const gd = useGameData();
   // 协议启动！'s official sprites (ui/protocolBoot.js), fetched while the briefing and the band draft run
   useEffect(() => { if (gd.ready) preloadBootArt(); }, [gd.ready]);
-  if (!pub || !gd.ready) {
-    return html`<div class="screen gload">
+  if (!pub || !gd.ready || (activeId && privId && privId !== activeId)) {
+    return html`<${SeatSwitch} /><div class="screen gload">
       <${Spinner} size="lg" label=${pub ? 'LOADING DATA' : 'ENTERING SIMULATION'} />
-      <p class="t-lo">${pub ? t('正在载入模拟数据…') : t('正在进入模拟…')}</p>
+      <p class="t-lo">${pub && privId && privId !== activeId ? t('正在切换席位…') : pub ? t('正在载入模拟数据…') : t('正在进入模拟…')}</p>
     </div>`;
   }
   const mode = phaseMode(pub.phase);
   let body;
-  if (hasResult || mode === 'result') body = html`<${ResultScreen} />`;
-  else if (mode === 'briefing') body = html`<${BriefingScreen} />`;
-  else if (mode === 'draft') body = html`<${BandDraftScreen} />`;
-  else body = html`<${MatchScreen} />`;
-  return html`${body}
+  // a different seat on screen is a different board / shop / draft: remount the screen (and its local state)
+  if (hasResult || mode === 'result') body = html`<${ResultScreen} key=${activeId} />`;
+  else if (mode === 'briefing') body = html`<${BriefingScreen} key=${activeId} />`;
+  else if (mode === 'draft') body = html`<${BandDraftScreen} key=${activeId} />`;
+  else body = html`<${MatchScreen} key=${activeId} />`;
+  return html`${!hasResult && mode !== 'result' && !ended ? html`<${SeatSwitch} />` : null}${body}
     ${(away || autoplay) && !hasResult && mode !== 'result' && !ended ? html`<${AwayOverlay} />` : null}
     ${(away || autoplay) && !hasResult && mode !== 'result' && !ended ? html`<${MatchChatButton} class="mchat-away-entry" />` : null}
     ${ended && !hasResult && mode !== 'result' ? html`<${MatchEnded} />` : null}
@@ -195,7 +217,7 @@ function MatchScreen() {
   const pub = useStore((s) => s.match.public);
   const priv = useStore((s) => s.match.private);
   const field = useStore((s) => s.match.field);
-  const myId = useStore((s) => s.me.playerId);
+  const myId = useStore(activeSeatId);
   const conn = useStore((s) => s.connection, shallowEqual);
   const emergency = useStore(emergencyActive);
   const emotes = useStore((s) => s.emotes);

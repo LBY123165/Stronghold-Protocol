@@ -21,7 +21,7 @@ import { useGameData, Img, Sprite, PlayerAvatar, BondGlyph, BandIcon } from '../
 import { normalizeResult, diyRecordFor, cardStandIn, standInForText } from '../ui/gameLogic.js';
 import { data } from '../data.js';
 import { chessPortraitUrl, chessAvatarUrl, itemIconUrl, enemyIconUrl, titleIconUrl } from '../ui/assetUrls.js';
-import { store, useStore, emptyMatch } from '../store.js';
+import { store, useStore, emptyMatch, activeSeatId } from '../store.js';
 import { audio } from '../audio.js';
 import { sentText } from '../ui/lang.js';
 import { reducedMotion } from '../ui/device.js';
@@ -606,7 +606,7 @@ export function SettleFlow({ res, pub = null, myId = null, content = null, backL
 export function ResultScreen() {
   const res = useStore((s) => s.match.result);
   const pub = useStore((s) => s.match.public);
-  const myId = useStore((s) => s.me.playerId);
+  const myId = useStore(activeSeatId);
   const hasRoom = useStore((s) => !!s.room);
   const content = useStore((s) => s.room?.content ?? null);
   const back = () => store.set({ match: emptyMatch() });

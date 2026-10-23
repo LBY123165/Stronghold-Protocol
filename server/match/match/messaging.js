@@ -9,12 +9,45 @@
 import { DELAYS } from './common.js';
 import { wireMessage } from '../../../shared/i18n.js';
 
+/**
+ * Frames that belong to one seat's own screen. A client controlling another seat (断线接管) must not have its own
+ * seat's stream overwrite the active seat's board / battle, and a controlled seat's stream goes to its controller.
+ */
+const SEAT_STREAM = new Set(['m.private', 'm.field', 'm.result', 'm.layer', 'm.unitStats',
+  'b.start', 'b.pool', 'b.end', 'b.snap', 'b.ev']);
+
 export class MatchMessaging {
   sendTo(playerId, msg) {
     if (this.disposed) return false;
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     if (!ps || ps.isBot || ps.left) return false;
-    try { return !!this.sendFn(playerId, msg); } catch (e) { this.reportError('send', e); return false; }
+    let to = playerId;
+    if (ps.controlledBy) {
+      // a handed-over seat's screen belongs to its controller, and only while that controller shows it
+      const owner = this.players.get(ps.controlledBy);
+      if (!owner || owner.left || !owner.connected || owner.activeSeat !== ps.playerId) return false;
+      to = owner.playerId;
+    } else if (ps.activeSeat && SEAT_STREAM.has(msg?.t)) {
+      // this client is showing the handed-over seat: its own seat's stream is not the screen
+      return false;
+    }
+    try { return !!this.sendFn(to, msg); } catch (e) { this.reportError('send', e); return false; }
+  }
+
+  /**
+   * The seats this client may act for, and the one on screen. Sent only while the client has any (a normal seat
+   * never sees the frame); `clear` sends the empty frame once when control is released.
+   */
+  _sendControl(ps, { clear = false } = {}) {
+    if (!ps || ps.isBot || ps.left || ps.spectator || this.disposed) return;
+    const seats = [];
+    for (const id of ps.controlSeats || []) {
+      const p = this.players.get(id);
+      if (p && !p.left) seats.push({ playerId: p.playerId, name: p.name });
+    }
+    if (!seats.length && !clear) return;
+    const active = seats.some((s) => s.playerId === ps.activeSeat) ? ps.activeSeat : null;
+    this.sendTo(ps.playerId, { t: 'm.control', active, seats });
   }
 
   broadcast(msg) {

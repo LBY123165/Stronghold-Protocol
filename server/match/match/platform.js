@@ -14,6 +14,9 @@ import { ruleOption } from '../../../shared/plugins/rules.js';
 
 const GAME_TYPES = new Set(Object.keys(C2S).filter((t) => Object.hasOwn(C2S, t) && (t.startsWith('g.') || t.startsWith('b.'))));
 const EMERGENCY_SAFE_TYPES = new Set(['g.watch', 'g.leave']);
+/** Intents that belong to the client's own session, never to the handed-over seat on screen. */
+const SESSION_INTENTS = new Set(['g.emote', 'g.takeoverVote', 'g.watch', 'g.autoplay', 'g.pause', 'g.uniteSkipVote',
+  'g.leave', 'g.test', 'g.rerollVote', 'b.rehearsalResult']);
 
 export class MatchPlatform {
   start() {
@@ -37,14 +40,14 @@ export class MatchPlatform {
    * @returns {{ ok: true } | { error: string, detail?: string }}
    */
   handle(playerId, msg) {
-    const ps = this.players.get(playerId) || this.spectators.get(playerId);
-    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
+    const session = this.players.get(playerId) || this.spectators.get(playerId);
+    if (!session || session.isBot || session.left) return fail(ERR.NOT_IN_ROOM);
     // a spectator seat only watches (the platform routes nothing else of it)
-    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
+    if (session.spectator && (!msg || msg.t !== 'g.watch')) {
       // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
       if (this.test && msg?.t === 'g.test') {
         let res;
-        try { res = this.applyTestCommand(ps, msg); }
+        try { res = this.applyTestCommand(session, msg); }
         catch (e) { this.reportError('handle g.test', e); res = fail(ERR.INTERNAL); }
         try { this.flush(); } catch (e) { this.reportError('flush', e); }
         return res && res.error ? res : OK;
@@ -61,13 +64,48 @@ export class MatchPlatform {
     if (this.emergencyFrozen && !EMERGENCY_SAFE_TYPES.has(msg.t)) return fail(ERR.SERVER_EMERGENCY);
     let res;
     try {
-      res = this._handle(ps, msg);
+      let seat = session;
+      if (msg.t === 'g.control') {
+        res = this.controlSeat(session, msg.playerId ?? null);
+      } else {
+        // 断线接管: gameplay intents act for the seat on screen; identity / vote / chat intents stay with the
+        // client's own session (its own seat remains a voter and a host).
+        if (session.activeSeat && !SESSION_INTENTS.has(msg.t)) {
+          const target = this.players.get(session.activeSeat);
+          if (target && !target.left && target.controlledBy === session.playerId) seat = target;
+          else { session.activeSeat = null; this._sendControl(session, { clear: true }); }
+        }
+        res = this._handle(seat, msg);
+      }
     } catch (e) {
       this.reportError(`handle ${msg.t}`, e);
       res = fail(ERR.INTERNAL);
     }
     try { this.flush(); } catch (e) { this.reportError('flush', e); }
     if (res && typeof res === 'object' && res.error) return res;
+    return OK;
+  }
+
+  /**
+   * 断线接管: switch this client between its own seat and a seat it controls. Omitting `playerId` returns to the
+   * client's own seat. A seat may only be shown while this client still controls it.
+   * @param {import('../PlayerState.js').PlayerState} session
+   * @param {string|null} playerId
+   */
+  controlSeat(session, playerId) {
+    if (!session || session.spectator) return fail(ERR.NOT_IN_ROOM);
+    if (playerId === session.activeSeat) return OK;
+    const previous = session.activeSeat ? this.players.get(session.activeSeat) : session;
+    if (playerId == null) {
+      session.activeSeat = null;
+    } else {
+      const target = this.players.get(playerId);
+      if (!target || target.left || target.controlledBy !== session.playerId) return fail(ERR.BAD_TARGET, 'seat not controlled');
+      session.activeSeat = playerId;
+    }
+    // the browser can only simulate the field on screen: hand the previous seat's live battle to the server
+    if (this.clientCombat && previous) this._authorityLost(previous, 'control-switch');
+    this._resync(session);
     return OK;
   }
 
@@ -141,7 +179,14 @@ export class MatchPlatform {
       this._resume();
       // 带宽应急保护: the gameplay consequences of a frozen match's disconnects apply once, on recovery
       if (this.emergencyFrozen) this._emergencyLostAuthorities.add(playerId);
-      else if (this.clientCombat) this._authorityLost(ps, 'disconnect');
+      else if (this.clientCombat) {
+        this._authorityLost(ps, 'disconnect');
+        // this browser may also be authoritative for a handed-over seat's battle
+        for (const targetId of ps.controlSeats || []) {
+          const target = this.players.get(targetId);
+          if (target) this._authorityLost(target, 'disconnect');
+        }
+      }
       // a rehearsal this host was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
       // 断线接管: the room decides how this seat is filled, unless the player comes back in time
@@ -158,6 +203,8 @@ export class MatchPlatform {
       ps.connected = true;
       this.refreshDraftPriority(playerId);
       this.refreshUniteSkipVote();
+      // 断线接管: a player who comes back takes their own seat back from a teammate
+      this.releaseSeatControl(playerId);
       // 断线接管: the player is back, so the room is not asked to decide this seat any more
       this.cancelTakeover(playerId);
       this._resync(ps);
@@ -173,20 +220,37 @@ export class MatchPlatform {
   _resync(ps) {
     const playerId = ps.playerId;
     this.sendTo(playerId, this.publicView());
+    // a full resync also clears a stale control list (the controller may have lost it while disconnected)
+    this._sendControl(ps, { clear: true });
+    const active = ps.activeSeat ? this.players.get(ps.activeSeat) : null;
+    if (active && !active.left && active.controlledBy === playerId) {
+      this._resyncSeat(active);
+      return;
+    }
+    if (ps.activeSeat) {
+      ps.activeSeat = null;
+      this._sendControl(ps, { clear: true });
+    }
+    this._resyncSeat(ps);
+  }
+
+  /** One seat's private / field / result frames (a controller's active seat or the session's own). */
+  _resyncSeat(seat) {
+    if (!seat) return;
     if (!this.ended) {
-      if (!ps.spectator) {
-        ps._lastPriv = null;
-        this._sendPrivate(ps, true);
+      if (!seat.spectator) {
+        seat._lastPriv = null;
+        this._sendPrivate(seat, true);
       }
-      if (this.clientCombat) this._resendBattle(ps);
-      else if (!this.fields.length && this._follows(ps)) this._followScout(ps, { keep: true });
+      if (this.clientCombat) this._resendBattle(seat);
+      else if (!this.fields.length && this._follows(seat)) this._followScout(seat, { keep: true });
       else {
-        let fid = this.watchers.get(playerId);
-        if (!fid && ps.spectator && this.fields.length) { fid = (this._watchTargetField(ps, this.fields) || this.fields[0]).fieldId; this.watchers.set(playerId, fid); }
-        if (fid) this._sendField(playerId, fid);
+        let fid = this.watchers.get(seat.playerId);
+        if (!fid && seat.spectator && this.fields.length) { fid = (this._watchTargetField(seat, this.fields) || this.fields[0]).fieldId; this.watchers.set(seat.playerId, fid); }
+        if (fid) this._sendField(seat.playerId, fid);
       }
     } else if (this.lastResultMsg) {
-      this.sendTo(playerId, { ...this.lastResultMsg, playerId });
+      this.sendTo(seat.playerId, { ...this.lastResultMsg, playerId: seat.playerId });
     }
   }
 
@@ -198,6 +262,17 @@ export class MatchPlatform {
       this.cancelSetupVote();
       ps.connected = false;
       ps.autoplay = false;
+      // 断线接管: a leaving controller gives its seats back to the AI; a leaving controlled seat leaves its controller
+      if (this.emergencyFrozen) {
+        for (const targetId of ps.controlSeats || []) this._emergencyLostAuthorities.add(targetId);
+      } else if (this.clientCombat) {
+        for (const targetId of ps.controlSeats || []) {
+          const target = this.players.get(targetId);
+          if (target) this._authorityLost(target, 'left');
+        }
+      }
+      this.releaseOwnedControls(playerId);
+      this.releaseSeatControl(playerId);
       this.refreshUniteSkipVote();
       this.watchers.delete(playerId);
       if (this.ended) return;

@@ -150,6 +150,16 @@ export class PlayerState {
     this.connected = this.isBot ? true : !!seat.connected;
     this.left = false;
     this.autoplay = false;
+    /**
+     * 断线接管 (dual-seat control): the seats this client may act for, the seat this client currently shows
+     * (`activeSeat`), and, on a handed-over seat, the client that controls it (`controlledBy`).
+     * @type {Set<string>}
+     */
+    this.controlSeats = new Set();
+    /** @type {string|null} */
+    this.activeSeat = null;
+    /** @type {string|null} the session playerId that controls this seat (handover) */
+    this.controlledBy = null;
     this.alive = true;
     this.lp = 0;
     this.bandId = null;

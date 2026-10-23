@@ -138,7 +138,7 @@ test('an eliminated player still votes: it is still a seat in this match', (t) =
   assert.equal(m.players.get('p_1').autoplay, true);
 });
 
-test('a teammate can step into the seat, and the vote names them', (t) => {
+test('a teammate takes the seat: control routes the active seat, and it can switch back', (t) => {
   const h = setup(t);
   const m = h.m;
   dropOut(h);
@@ -154,8 +154,52 @@ test('a teammate can step into the seat, and the vote names them', (t) => {
 
   assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover', candidatePlayerId: 'p_2' }).ok, true);
   assert.equal(m.takeoverVote, null, 'the vote closed');
-  // the seat's owner is not on AI control: a teammate took over
-  assert.equal(m.players.get('p_1').autoplay, false);
+
+  const target = m.players.get('p_1');
+  const candidate = m.players.get('p_2');
+  assert.equal(target.autoplay, false, 'a teammate took over, not the AI');
+  assert.equal(target.controlledBy, 'p_2', 'the seat belongs to the candidate client');
+  assert.deepEqual([...candidate.controlSeats], ['p_1']);
+  assert.equal(candidate.activeSeat, 'p_1', 'the candidate switched to the handed-over seat');
+
+  // m.control tells the candidate client what it may show; the seat's private view follows
+  const control = h.sent.filter(([id, msg]) => id === 'p_2' && msg.t === 'm.control').at(-1)[1];
+  assert.equal(control.active, 'p_1');
+  assert.deepEqual(control.seats, [{ playerId: 'p_1', name: 'P1' }]);
+  assert.ok(h.sent.some(([id, msg]) => id === 'p_2' && msg.t === 'm.private' && msg.playerId === 'p_1'),
+    'the candidate receives the handed-over seat private view');
+
+  // a gameplay intent from the candidate acts on p_1; a session intent stays on p_2
+  assert.equal(m.handle('p_2', { t: 'g.infoReady', setupRevision: m.setupRevision }).ok, true);
+  assert.equal(m.players.get('p_1').infoReady, true, 'the active seat got the Ready');
+  assert.equal(m.players.get('p_2').infoReady, false, 'the own seat did not');
+
+  // switch back to the own seat: its private view and normal intents return
+  assert.equal(m.handle('p_2', { t: 'g.control' }).ok, true);
+  assert.equal(candidate.activeSeat, null);
+  const clear = h.sent.filter(([id, msg]) => id === 'p_2' && msg.t === 'm.control').at(-1)[1];
+  assert.equal(clear.active, null);
+  assert.deepEqual(clear.seats, [{ playerId: 'p_1', name: 'P1' }], 'the seat stays available as a tab');
+  assert.equal(m.handle('p_2', { t: 'g.infoReady', setupRevision: m.setupRevision }).ok, true);
+  assert.equal(m.players.get('p_2').infoReady, true);
+});
+
+test('a handed-over seat comes back to its player when they reconnect', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  dropOut(h);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover', candidatePlayerId: 'p_2' }).ok, true);
+  assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover', candidatePlayerId: 'p_2' }).ok, true);
+  assert.equal(m.players.get('p_1').controlledBy, 'p_2');
+
+  m.onReconnect('p_1');
+  assert.equal(m.players.get('p_1').controlledBy, null, 'the owner took the seat back');
+  assert.equal(m.players.get('p_2').controlSeats.size, 0);
+  assert.equal(m.players.get('p_2').activeSeat, null, 'the controller switched back to its own seat');
+  assert.equal(m.players.get('p_1').connected, true);
+  const clear = h.sent.filter(([id, msg]) => id === 'p_2' && msg.t === 'm.control').at(-1)[1];
+  assert.equal(clear.active, null);
+  assert.deepEqual(clear.seats, [], 'the seat tab is gone');
 });
 
 test('the two options are exclusive: a voter may change their mind', (t) => {

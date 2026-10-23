@@ -57,6 +57,21 @@
 .takeover-chip__time { flex: 0 0 auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .takeover-chip__open { flex: 0 0 auto; margin-left: .04rem; color: var(--mint-500); }
 
+/* 断线接管: the seats this client controls — own seat + handed-over seats */
+.seatswitch {
+  position: fixed; z-index: 58; left: max(.3rem, env(safe-area-inset-left)); top: 42%;
+  display: flex; flex-direction: column; gap: .04rem;
+  padding: .05rem; background: rgba(10, 13, 12, .9); border: 1px solid var(--line-2);
+  max-width: min(9rem, 30vw);
+}
+.seatswitch__tab {
+  padding: .05rem .1rem; background: transparent; border: 1px solid transparent;
+  color: var(--text-lo); font: inherit; font-size: calc(.13 * var(--t)); line-height: 1.3;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.seatswitch__tab:hover, .seatswitch__tab:focus-visible { color: var(--text); border-color: var(--line-2); }
+.seatswitch__tab.is-on { color: var(--amber); border-color: var(--amber); background: rgba(255, 198, 0, .08); }
+
 @media (max-width: 900px) {
   .takeover { width: calc(100vw - .6rem); bottom: max(.8rem, env(safe-area-inset-bottom)); padding: .12rem 1.3rem .12rem .14rem; }
   .takeover__opts { grid-template-columns: 1fr; }

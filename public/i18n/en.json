@@ -2438,5 +2438,9 @@
   "等待接管决定": "Waiting for a takeover decision",
   "剩余 {sec} 秒": "{sec}s left",
   "展开": "Open",
-  "接管投票超时：{name} 的席位由 AI 接管": "Takeover vote timed out: AI takes over {name}'s seat"
+  "接管投票超时：{name} 的席位由 AI 接管": "Takeover vote timed out: AI takes over {name}'s seat",
+  "我的席位": "My seat",
+  "接管席位": "Controlled seats",
+  "接管 {name} 的席位": "Take over {name}'s seat",
+  "正在切换席位…": "Switching seats…"
 }

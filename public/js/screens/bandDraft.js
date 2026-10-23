@@ -26,7 +26,7 @@ import { StepHeader, ExitModal } from '../ui/matchChrome.js';
 import { MatchInfoDialog, matchInfoModel } from '../ui/matchInfo.js';
 import { actions, act, draftRequestScope } from '../ui/gameActions.js';
 import { normalizeDraft, sortedPlayers } from '../ui/gameLogic.js';
-import { useStore } from '../store.js';
+import { useStore, activeSeatId } from '../store.js';
 import { MatchChatButton } from '../ui/matchChat.js';
 import { data } from '../data.js';
 import { audio } from '../audio.js';
@@ -191,7 +191,7 @@ export function draftInfoStatus({ myPick = null, pickName = null, myTurn, turnNa
 export function BandDraftScreen() {
   const pub = useStore((s) => s.match.public);
   const priv = useStore((s) => s.match.private);
-  const myId = useStore((s) => s.me.playerId);
+  const myId = useStore(activeSeatId);
   const roomSolo = useStore((s) => s.room?.mode === 'solo');
   const gd = useGameData();
   const [sel, setSel] = useState(null);

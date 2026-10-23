@@ -614,6 +614,8 @@ export const C2S = {
   //   candidatePlayerId: the teammate who takes the seat (mode 'handover' only).
   'g.takeoverVote': { targetPlayerId: isId, mode: (v) => v === 'bot' || v === 'handover',
     candidatePlayerId: (v) => isId, $optional: ['candidatePlayerId'] },
+  // 断线接管: switch this client between its own seat and a handed-over seat (absent playerId = own).
+  'g.control': { playerId: isId, $optional: ['playerId'] },
   // the stats the own board's units start their next battle with (user playtest #4 item 7; prep phases): answered by
   // the push m.unitStats { seq, round, units: [unitStatsEntry] }; `seq` is echoed so the client keeps the newest answer
   'g.unitStats': { seq: (v) => isInt(v, 0, 2 ** 31), $optional: ['seq'] },
@@ -664,6 +666,9 @@ export const S2C = [
   'lobby.state',
   'room.state', 'room.closed',
   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
+  // m.control { active, seats: [{ playerId, name }] } — the seats this client may control and the one on screen
+  // (断线接管; a client with no controlled seats never receives it)
+  'm.control',
   // m.layer { playerId, bondId, add } — own live prep layer gain; ephemeral, never replayed on resync.
   'm.layer',
   // Post-v1 JSON fallback; repeated in welcome.emergency and match public freeze extensions.

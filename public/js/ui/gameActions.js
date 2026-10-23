@@ -85,6 +85,8 @@ export const actions = {
   // 断线接管投票 (GitHub #338 follow-up): fill a disconnected seat with an AI, or let a teammate step into it
   takeoverVote: (targetPlayerId, mode, candidatePlayerId = null) =>
     act('g.takeoverVote', { targetPlayerId, mode, candidatePlayerId }, { sfx: 'confirm' }),
+  // 断线接管: show a handed-over seat (null = my own seat)
+  controlSeat: (playerId = null) => act('g.control', playerId ? { playerId } : {}),
   band: (bandId, opts = {}) => act('g.band', { bandId, ...draftRequestScope(opts) }),
   bandSkip: (opts = {}) => act('g.bandSkip', draftRequestScope(opts)),
   buy: (slot) => act('g.buy', { slot }),
