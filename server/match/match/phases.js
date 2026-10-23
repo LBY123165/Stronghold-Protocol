@@ -27,7 +27,13 @@ export class MatchPhases {
   nextDraftId(kind) { return `${kind}:${this.battlePrefix}:${this.round}:${++this.draftSeq}`; }
 
   // Active manual pickers precede AI, autoplay and disconnected seats. Only pending turns are reordered.
-  manualDraftPicker(ps) { return !!ps && ps.alive && !ps.left && ps.connected && !ps.botControlled; }
+  // A handed-over seat counts as manual while its controller shows it (断线接管).
+  manualDraftPicker(ps) {
+    if (!ps || !ps.alive || ps.left || ps.botControlled) return false;
+    if (ps.connected) return true;
+    const owner = ps.controlledBy ? this.players.get(ps.controlledBy) : null;
+    return !!owner && owner.connected && !owner.left && owner.activeSeat === ps.playerId;
+  }
 
   /** The fixed pool membership persists; only the living, present seats have a turn in this stage. */
   makeDraftGroups({ shuffle = true } = {}) {

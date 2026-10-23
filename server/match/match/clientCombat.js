@@ -89,7 +89,12 @@ export class MatchClientCombat {
     for (const pid of f.players) {
       if (pid === exclude || (f.demoted && f.demoted.has(pid))) continue;
       const ps = this.players.get(pid);
-      if (!ps || ps.isBot || ps.left || !ps.connected) continue;
+      if (!ps || ps.isBot || ps.left) continue;
+      // a handed-over seat is simulated by its controller, but only while that controller shows this seat
+      const controller = ps.controlledBy ? this.players.get(ps.controlledBy) : null;
+      const actor = ps.connected ? ps : controller;
+      if (!actor || actor.isBot || actor.left || !actor.connected) continue;
+      if ((actor.activeSeat || actor.playerId) !== ps.playerId) continue;
       if (!best || ps.seat < best.seat) best = ps;
     }
     return best ? best.playerId : null;
@@ -108,7 +113,7 @@ export class MatchClientCombat {
 
   _sendStart(pid, f, opts = {}) {
     const ps = this.players.get(pid) || this.spectators.get(pid);
-    if (!ps || ps.isBot || ps.left || !ps.connected) return false;
+    if (!this.canReceive(ps)) return false;
     return this.sendTo(pid, this._startMsg(f, pid, opts));
   }
 

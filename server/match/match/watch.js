@@ -171,7 +171,7 @@ export class MatchWatch {
       const f = own || this._watchTargetField(ps, this.fields) || this.fields[0];
       if (!f) continue;
       this.watchers.set(ps.playerId, f.fieldId);
-      if (ps.connected) this._sendField(ps.playerId, f.fieldId);
+      if (this.canReceive(ps)) this._sendField(ps.playerId, f.fieldId);
     }
   }
 

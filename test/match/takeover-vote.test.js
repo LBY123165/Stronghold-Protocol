@@ -184,6 +184,30 @@ test('a teammate takes the seat: control routes the active seat, and it can swit
   assert.equal(m.players.get('p_2').infoReady, true);
 });
 
+test('a handed-over seat keeps updating its controller\'s screen and battle authority', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  h.runToPhase('PREP');
+  dropOut(h);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover', candidatePlayerId: 'p_2' }).ok, true);
+  assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'handover', candidatePlayerId: 'p_2' }).ok, true);
+  assert.equal(m.players.get('p_2').activeSeat, 'p_1');
+  assert.equal(m.canReceive(m.players.get('p_1')), true, 'the disconnected seat streams to its controller');
+  assert.equal(m._authorityFor({ players: ['p_1'], spec: {}, demoted: null }), 'p_1',
+    'the controller simulates the handed-over seat\'s battle while showing it');
+
+  const before = h.sent.length;
+  assert.equal(m.handle('p_2', { t: 'g.freeze' }).ok, true);
+  m.flush(true);
+  assert.ok(h.sent.slice(before).some(([id, msg]) => id === 'p_2' && msg.t === 'm.private' && msg.playerId === 'p_1'),
+    'an action on the handed-over seat pushes its private view to the controller');
+
+  // back on the own seat: the handed-over seat is no longer streamed, and its battle returns to the server
+  assert.equal(m.handle('p_2', { t: 'g.control' }).ok, true);
+  assert.equal(m.canReceive(m.players.get('p_1')), false);
+  assert.equal(m._authorityFor({ players: ['p_1'], spec: {}, demoted: null }), null);
+});
+
 test('a handed-over seat comes back to its player when they reconnect', (t) => {
   const h = setup(t);
   const m = h.m;

@@ -176,7 +176,9 @@ Tracked in [issue #338](https://github.com/sganggs/Stronghold-Protocol/issues/33
   `target.controlledBy = candidate.playerId`, the candidate's `controlSeats` gains the target, and the candidate's
   browser switches to it (`activeSeat`). The target's lineup stays on the board and the candidate acts for it (shop,
   prep, draft, battle reports) until they switch back. The candidate's own seat remains a human seat, a voter and the
-  host: voting / chat / 暂离 stay with the session, gameplay follows the seat on screen. A controller that leaves
+  host: voting / chat / 暂离 stay with the session, gameplay follows the seat on screen. While the candidate shows the
+  seat, its `m.private` / `m.field` / `b.*` stream to the candidate and the seat's battle authority is simulated by
+  the candidate's browser; switching away or leaving hands that battle to the server. A controller that leaves
   returns its seats to the AI; a target that reconnects takes its seat back (the controller switches to its own).
   Both outcomes go through the ticker at `FLOW_TICKER_PRIORITY`.
 - **The wire.** `m.public` carries `takeoverPending` (the prompt: the seat, its owner, the candidates, the voters)

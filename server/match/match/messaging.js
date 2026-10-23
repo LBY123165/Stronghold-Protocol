@@ -35,6 +35,17 @@ export class MatchMessaging {
   }
 
   /**
+   * Whether this seat's screen can be sent to its owner or to a controller that currently shows it. A handed-over
+   * seat is disconnected, but its controller's active screen is that seat.
+   */
+  canReceive(ps) {
+    if (!ps || ps.isBot || ps.left) return false;
+    if (ps.connected) return true;
+    const owner = ps.controlledBy ? this.players.get(ps.controlledBy) : null;
+    return !!owner && owner.connected && !owner.left && owner.activeSeat === ps.playerId;
+  }
+
+  /**
    * The seats this client may act for, and the one on screen. Sent only while the client has any (a normal seat
    * never sees the frame); `clear` sends the empty frame once when control is released.
    */
@@ -57,7 +68,7 @@ export class MatchMessaging {
 
   /** @param {string|{ msgid: string, params?: object }} text a string or msg() (shared/i18n.js) */
   toast(ps, kind, text) {
-    if (!ps || ps.isBot || ps.left || !ps.connected) return;
+    if (!ps || ps.isBot || ps.left || !this.canReceive(ps)) return;
     this.sendTo(ps.playerId, { t: 'm.toast', kind, ...wireMessage(text) });
   }
 
@@ -104,7 +115,7 @@ export class MatchMessaging {
       const list = [...this._privDirty];
       this._privDirty.clear();
       for (const ps of list) {
-        if (!(ps.isBot || ps.left || !ps.connected)) this._sendPrivate(ps, false);
+        if (this.canReceive(ps)) this._sendPrivate(ps, false);
         this._notifyPrepScouts(ps);
       }
     }
