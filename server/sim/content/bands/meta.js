@@ -90,6 +90,17 @@ function rollBond(ctx, bond, { anyTier = false } = {}) {
   return ctx.rollChess({ bond, maxTier: Math.max(1, ctx.shopLevel()) }) || (anyTier ? ctx.rollChess({ bond, maxTier: 6 }) : null);
 }
 
+/**
+ * Same roll, but with the bond in the pool filter: 0.3.1's `ctx.rollChess` drops `opts.bond`, which turned 杜遥夜's
+ * "first two refreshes show a 炎 operator" into a random operator. Kept local so the official golden replays of the
+ * other bond strategies (贾维, 哈洛德, …) do not move.
+ */
+function rollBondPresent(ctx, bond, { anyTier = false } = {}) {
+  const filter = (id) => hasBond(ctx, id, bond);
+  return ctx.rollChess({ filter, maxTier: Math.max(1, ctx.shopLevel()) })
+    || (anyTier ? ctx.rollChess({ filter, maxTier: 6 }) : null);
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // buff key → (params[], bandId) → hooks
 
@@ -124,7 +135,7 @@ K.band_first_self_refresh_present_char = (ps) => ({
     const others = ctx.rng.shuffle(idx.filter((i) => !hasBond(ctx, slots[i].id, p.bond)));
     for (const i of others) {
       if (have >= need) break;
-      const id = rollBond(ctx, p.bond);
+      const id = rollBondPresent(ctx, p.bond);
       if (!id) break;
       ctx.setShopSlot(i, { kind: 'chess', id });
       have++;
