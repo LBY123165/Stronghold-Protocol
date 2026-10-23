@@ -68,6 +68,7 @@ import { lanUrls, displayHost, isProcessEntry, runMain } from './http/boot.js';
 import { createAdminService, createLogRing, readAdminSecret, withLogRing } from './admin.js';
 import { createAdminHandler } from './http/admin.js';
 import { createAccountStore } from './accounts.js';
+import { createAdminAccountStore } from './adminAccounts.js';
 
 // The public API of this module (tests and tools import it from here); the code lives in ./http/.
 export {
@@ -80,7 +81,7 @@ export {
  * @param {{
  *   port?: number, host?: string, quiet?: boolean, log?: object,
  *   publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, pluginsDir?: string,
- *   announcementsDir?: string, serverSettingsDir?: string, accountsFile?: string,
+ *   announcementsDir?: string, serverSettingsDir?: string, accountsFile?: string, adminAccountsFile?: string,
  *   MatchClass?: Function, seedFn?: () => number,
  *   lobbyGraceMs?: number, reconnectWindowMs?: number, heartbeatMs?: number, helloTimeoutMs?: number,
  *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number, compactWire?: boolean, runtimeCache?: boolean,
@@ -143,6 +144,13 @@ export async function startServer(opts = {}) {
     log,
   });
   await accounts.ready;
+  // 运维账号 (docs/ADMIN.md): the console's own operator accounts, so several operators work with their own identity
+  // (the announcement catalog records who published). Stored in runtime/ beside the player accounts.
+  const adminAccounts = createAdminAccountStore({
+    file: opts.adminAccountsFile || path.join(ROOT, 'runtime', 'admin-accounts.json'),
+    log,
+  });
+  await adminAccounts.ready;
   // 公告 (docs/ANNOUNCEMENTS.md): the served notices (their live push starts once the network exists)
   const announcements = createAnnouncementStore({ dir: opts.announcementsDir, root: ROOT, log });
   packs.refresh(true);
@@ -221,7 +229,7 @@ export async function startServer(opts = {}) {
   });
   const adminService = createAdminService({
     enabled: !!adminSecret.secret, secret: adminSecret.secret, secretSource: adminSecret.source, problem: adminSecret.problem,
-    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts,
+    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts, adminAccounts,
     ring: logRing, log, startedAt, build: buildTag,
   });
   const admin = createAdminHandler({ admin: adminService, serveStatic, log });
