@@ -246,6 +246,10 @@ export class MatchTakeover {
     if (mode === 'handover') {
       const candidate = this.takeoverCandidates(targetPlayerId).find((p) => p.playerId === candidatePlayerId);
       if (!candidate) return fail(ERR.BAD_TARGET, 'that teammate cannot step in');
+      // the first handover ballot fixes who steps in; later voters join that side (the tally names one candidate)
+      if (option.votes.size && option.candidatePlayerId && option.candidatePlayerId !== candidate.playerId) {
+        return fail(ERR.BAD_TARGET, 'the handover candidate is already chosen');
+      }
       option.candidatePlayerId = candidate.playerId;
       option.candidateName = candidate.name;
     } else {

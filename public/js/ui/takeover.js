@@ -188,7 +188,13 @@ export function TakeoverHost() {
   if (!vote) {
     const needed = majorityNeeded(voters.length);
     const blank = { votes: 0, needed, voterIds: [], done: false, mine: false };
-    const options = promptOptions(pending);
+    const candidates = Array.isArray(pending?.candidates) ? pending.candidates : [];
+    const options = [
+      promptOptions(pending)[0],
+      ...candidates.map((c) => ({
+        mode: 'handover', label: `${t('队友接替')} · ${c.name}`, candidatePlayerId: c.playerId, candidates: [c],
+      })),
+    ];
     return html`<section class="takeover" aria-label=${t('断线接管')} aria-live="polite">
       ${fold}
       <div class="takeover__head">
@@ -196,12 +202,9 @@ export function TakeoverHost() {
         <span>${t('未开启 AI 托管，房间需要决定这个席位由谁接管。')}<//>
       </div>
       <div class="takeover__opts">
-        ${options.map((option) => html`<${OptionRow} key=${option.mode} label=${option.label} tally=${blank}
+        ${options.map((option) => html`<${OptionRow} key=${`${option.mode}:${option.candidatePlayerId ?? ''}`} label=${option.label} tally=${blank}
           disabled=${!canVote || busy}
-          onPick=${() => send(() => actions.takeoverVote(targetPlayerId, option.mode, option.candidatePlayerId))}>
-          ${option.mode === 'handover' && option.candidates.length > 1
-            ? html`<ul class="takeover-cands">${option.candidates.map((c) => html`<li key=${c.playerId}>${c.name}<//>`)}<//>` : null}
-        <//>`)}
+          onPick=${() => send(() => actions.takeoverVote(targetPlayerId, option.mode, option.candidatePlayerId))}><//>`)}
       </div>
       ${options.length === 1 ? html`<p class="takeover__note">${t('没有有余力的队友可接替，只能由 AI 接管。')}<//>` : null}
       ${note ? html`<p class="takeover__note">${note}<//>` : null}
