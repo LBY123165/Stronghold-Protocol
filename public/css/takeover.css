@@ -59,7 +59,7 @@
 
 /* 断线接管: the seats this client controls — own seat + handed-over seats */
 .seatswitch {
-  position: fixed; z-index: 58; left: max(.3rem, env(safe-area-inset-left)); top: 42%;
+  position: fixed; z-index: 58; left: max(.3rem, env(safe-area-inset-left)); bottom: max(2.2rem, env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: .04rem;
   padding: .05rem; background: rgba(10, 13, 12, .9); border: 1px solid var(--line-2);
   max-width: min(9rem, 30vw);
