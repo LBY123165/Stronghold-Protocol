@@ -14,7 +14,7 @@ import { ERR } from '../../../shared/constants.js';
 import { msg } from '../../../shared/i18n.js';
 import { OK, fail, FLOW_TICKER_PRIORITY } from './common.js';
 
-/** How long a takeover vote stays open before it is dropped (ms of match time). */
+/** How long a takeover vote stays open before the ceiling fills the seat with the current leader (ms of match time). */
 export const TAKEOVER_VOTE_MS = 45_000;
 
 /**
@@ -32,8 +32,14 @@ export class MatchTakeover {
   /**
    * The takeover vote's public view: the open vote, its options and the tally. The bodies never ride the
    * snapshot; the player ids are the room's own.
+   *
+   * `eligible` is who may still vote, `voters` is who has already voted. The client must read `eligible` for
+   * `canVote`; reading `voters` there made every other player unable to vote after the first ballot, and the
+   * old `votersOf(vote, pending.voters)` access crashed once the prompt was replaced by the tally
+   * (`takeoverPending` is cleared when the vote opens) — the `Cannot read properties of null (reading 'voters')`
+   * screen.
    * @returns {null | { id: number, targetPlayerId: string, targetName: string, options: object[], voters: string[],
-   *   needed: number, endsAt: number }}
+   *   eligible: string[], needed: number, endsAt: number }}
    */
   takeoverVoteView() {
     const vote = this.takeoverVote;
@@ -51,7 +57,9 @@ export class MatchTakeover {
       targetPlayerId: vote.targetPlayerId,
       targetName: vote.targetName,
       options,
+      // who has voted (the ballots cast) and who may vote (the room's connected human seats)
       voters: [...vote.voters],
+      eligible: this.takeoverVoters(),
       needed: vote.needed,
       endsAt: vote.endsAt,
     };
@@ -130,7 +138,7 @@ export class MatchTakeover {
       this.markPublic();
     }
     if (this.takeoverVote && this.takeoverVote.targetPlayerId === playerId) {
-      this.takeoverVote = null;
+      this._closeTakeoverVote(this.takeoverVote);
       this.markPublic();
     }
   }
@@ -153,6 +161,33 @@ export class MatchTakeover {
     };
   }
 
+  /** Drop a vote and its ceiling timer (a majority, a reconnect or the ceiling itself). */
+  _closeTakeoverVote(vote) {
+    if (!vote) return;
+    if (vote.timer) {
+      this.cancel(vote.timer);
+      vote.timer = null;
+    }
+    if (this.takeoverVote === vote) this.takeoverVote = null;
+  }
+
+  /**
+   * The ceiling passed with no majority: close the vote and fill the seat anyway. The side with the most
+   * ballots wins; a tie (or nobody voted) goes to the AI, so a room that never decides cannot leave the seat
+   * hanging. [ASSUMED] This is part of the fork's convenience vote, not an official rule.
+   * @param {object} vote the vote the timer was armed for
+   */
+  _expireTakeoverVote(vote) {
+    if (this.takeoverVote !== vote) return;
+    vote.timer = null;
+    const winner = vote.options[1].votes.size > vote.options[0].votes.size
+      ? vote.options[1]
+      : vote.options[0];
+    this._closeTakeoverVote(vote);
+    this.markPublic();
+    this._applyTakeover(vote, winner, { timeout: true });
+  }
+
   /**
    * g.takeoverVote { targetPlayerId, mode, candidatePlayerId? }: a vote for one of the two ways to fill the seat.
    * The first vote opens the vote; the later ones add to the tally. A vote for a different option replaces this
@@ -168,11 +203,13 @@ export class MatchTakeover {
     if (target.connected) return fail(ERR.BAD_TARGET, 'that seat is connected');
     if (target.autoplay) return fail(ERR.BAD_TARGET, 'that seat is already on AI control');
 
+    // checked on every ballot, not only the first one: a seat that dropped after the vote opened is no voter
+    const voters = this.takeoverVoters();
+    if (!voters.includes(ps.playerId)) return fail(ERR.NOT_IN_ROOM, 'only the room\'s players vote');
+    if (voters.length < 2) return fail(ERR.BAD_TARGET, 'nobody else can decide this seat');
+
     let vote = this.takeoverVote;
     if (!vote || vote.targetPlayerId !== targetPlayerId) {
-      const voters = this.takeoverVoters();
-      if (!voters.includes(ps.playerId)) return fail(ERR.NOT_IN_ROOM, 'only the room\'s players vote');
-      if (voters.length < 2) return fail(ERR.BAD_TARGET, 'nobody else can decide this seat');
       const now = this.sched.now();
       vote = this.takeoverVote = {
         id: ++this._takeoverVoteSeq,
@@ -186,10 +223,17 @@ export class MatchTakeover {
         voters: new Set(),
         needed: majorityOf(voters),
         endsAt: now + TAKEOVER_VOTE_MS,
+        timer: null,
       };
+      vote.timer = this.later(TAKEOVER_VOTE_MS, () => {
+        vote.timer = null;
+        this._expireTakeoverVote(vote);
+      });
       // the tally replaces the prompt: the room has answered
       if (this.takeoverPending === targetPlayerId) this.takeoverPending = null;
     }
+    // eligibility can shrink while the vote is open (a voter drops): the threshold follows the current room
+    vote.needed = majorityOf(voters);
     if (vote.voters.has(ps.playerId)) {
       // a player may change their mind: the earlier vote is withdrawn first
       for (const option of vote.options) option.votes.delete(ps.playerId);
@@ -222,27 +266,44 @@ export class MatchTakeover {
       this.markPublic();
       return;
     }
-    this.takeoverVote = null;
+    this._closeTakeoverVote(vote);
     this._applyTakeover(vote, winner);
   }
 
-  /** Apply the vote's outcome: the seat becomes an AI's, or a teammate steps into it. */
-  _applyTakeover(vote, winner) {
+  /** Put a disconnected seat under AI control and say so (a ballot, the ceiling, or a failed handover). */
+  _takeSeatByAi(target, { timeout = false } = {}) {
+    target.autoplay = true;
+    this.refreshDraftPriority(target.playerId);
+    this.refreshUniteSkipVote();
+    this.markPublic();
+    const text = timeout
+      ? msg('接管投票超时：{name} 的席位由 AI 接管', { name: target.name })
+      : msg('断线接管：{name} 的席位由 AI 接管', { name: target.name });
+    this.tickerText(text, FLOW_TICKER_PRIORITY);
+  }
+
+  /**
+   * Apply the vote's outcome: the seat becomes an AI's, or a teammate steps into it.
+   * @param {object} vote the closed vote
+   * @param {object} winner the option that reached the majority (or the ceiling's winner)
+   * @param {{ timeout?: boolean }} [opts] the ceiling chose it, not a majority
+   */
+  _applyTakeover(vote, winner, { timeout = false } = {}) {
     const target = this.players.get(vote.targetPlayerId);
     if (!target || target.left || target.connected) return;
     if (winner.mode === 'bot') {
       // the seat keeps its lineup; the server takes it over (the same way a disconnected seat is simulated)
-      target.autoplay = true;
-      this.refreshDraftPriority(target.playerId);
-      this.refreshUniteSkipVote();
-      this.markPublic();
-      this.tickerText(msg('断线接管：{name} 的席位由 AI 接管', { name: target.name }), FLOW_TICKER_PRIORITY);
+      this._takeSeatByAi(target, { timeout });
       return;
     }
     // a teammate steps into the seat: the seat's player becomes the candidate, and the disconnected player is
     // out of the match (their lineup stays on the board until the new player's first turn).
     const candidate = this.players.get(winner.candidatePlayerId);
-    if (!candidate || candidate.left || !candidate.connected) return;
+    if (!candidate || candidate.left || !candidate.connected) {
+      // the named teammate left before the vote closed: fall back to the AI rather than leave the seat hanging
+      this._takeSeatByAi(target, { timeout });
+      return;
+    }
     target.autoplay = false;
     this.refreshDraftPriority(target.playerId);
     this.refreshUniteSkipVote();

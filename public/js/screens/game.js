@@ -1525,10 +1525,18 @@ function MatchScreen() {
         return;
       }
       if (act === 'retreat' || act === 'sell') {
-        if (!L.showPrep || L.drag || L.facing || L.selBusy || L.pen || !pointer || pointer.buttons) return;
-        const uid = L.view?.pieceAtClientPoint(pointer.x, pointer.y);
-        const hovered = Number.isInteger(uid) ? L.placeCtx.pieces.get(uid) : null;
-        if (hovered?.piece.kind !== 'chess') return;
+        if (!L.showPrep || L.drag || L.facing || L.selBusy || L.pen || pointer?.buttons) return;
+        // The underframe's action belongs to the SELECTED operator. Only with nothing selected does the key
+        // fall back to the operator under the pointer, so a selection can never be overridden by a stray mouse
+        // position (user report: X sold the hovered operator instead of the chosen one).
+        const selectedUid = Number.isInteger(L.sel?.uid) ? L.sel.uid : null;
+        let uid = selectedUid;
+        if (uid == null) {
+          if (!pointer) return;
+          uid = L.view?.pieceAtClientPoint(pointer.x, pointer.y);
+        }
+        const piece = Number.isInteger(uid) ? L.placeCtx.pieces.get(uid) : null;
+        if (piece?.piece.kind !== 'chess') return;
         const available = underframeActions(L.placeCtx, uid);
         if (act === 'retreat' && available?.retreat) await retreatPiece(uid);
         else if (act === 'sell' && available?.sell != null) await sellOwnPiece(uid);

@@ -2,7 +2,7 @@
 // only the options the server published, and only to a voter. Pure view helpers, no browser and no port.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { majorityNeeded, votersOf, canVoteAs, isInMatchSeats, tallyOf, promptOptions } from '../../public/js/ui/takeover.js';
+import { majorityNeeded, votersOf, takeoverVotersOf, canVoteAs, isInMatchSeats, tallyOf, promptOptions } from '../../public/js/ui/takeover.js';
 import { validateC2S } from '../../shared/protocol.js';
 
 test('the vote needs more than half of the room\'s online players', () => {
@@ -13,10 +13,36 @@ test('the vote needs more than half of the room\'s online players', () => {
   assert.equal(majorityNeeded(1), 1, 'a lone voter decides alone (the server never opens such a vote)');
 });
 
-test('voters: the online players and the spectator seats, read from either shape of m.public', () => {
+test('voters: the tally\'s eligible list, the prompt fallback, and never the ballots already cast', () => {
   assert.deepEqual(votersOf(null, ['p_0', 'p_2']), ['p_0', 'p_2'], 'no tally yet: the prompt lists them');
-  assert.deepEqual(votersOf({ voters: ['p_0', 'p_2'] }, ['p_0', 'p_2']), ['p_0', 'p_2'], 'the tally is authoritative');
-  assert.deepEqual(votersOf({ voters: [] }, ['p_0']), ['p_0'], 'an empty tally still falls back to the prompt');
+  assert.deepEqual(votersOf({ eligible: ['p_0', 'p_2'], voters: ['p_0'] }, ['p_9']), ['p_0', 'p_2'],
+    'the tally\'s electorate wins over its ballots');
+  assert.deepEqual(votersOf({ voters: ['p_0'] }, ['p_0', 'p_2']), ['p_0'],
+    'an older tally without eligible falls back to its ballots, so the panel still renders');
+  assert.deepEqual(votersOf({ eligible: [] }, ['p_0']), [], 'an empty electorate is not the prompt fallback');
+});
+
+test('takeoverVotersOf: the prompt is gone once the tally opens, and the panel must not throw', () => {
+  const vote = { targetPlayerId: 'p_1', eligible: ['p_0', 'p_2'], voters: ['p_0'], options: [], needed: 2 };
+  // the exact state after the first click: takeoverPending is null while takeoverVote is present
+  assert.deepEqual(takeoverVotersOf({ takeoverVote: vote }), ['p_0', 'p_2']);
+  assert.deepEqual(takeoverVotersOf({ takeoverPending: { voters: ['p_0', 'p_2'] } }), ['p_0', 'p_2']);
+  assert.deepEqual(takeoverVotersOf({}), []);
+});
+
+test('the ballot of one player does not lock the other voters out', () => {
+  const vote = {
+    eligible: ['p_0', 'p_2'],
+    voters: ['p_0'],
+    options: [
+      { mode: 'bot', candidatePlayerId: null, candidateName: null, votes: 1, voterIds: ['p_0'] },
+      { mode: 'handover', candidatePlayerId: null, candidateName: null, votes: 0, voterIds: [] },
+    ],
+    needed: 2,
+  };
+  const voters = takeoverVotersOf({ takeoverVote: vote });
+  assert.equal(canVoteAs(voters, 'p_0', true), true);
+  assert.equal(canVoteAs(voters, 'p_2', true), true, 'the second voter is still eligible after the first ballot');
 });
 
 test('canVoteAs: only a voter, only online, and never without an identity', () => {
@@ -49,6 +75,8 @@ test('tallyOf: each side\'s count, its voters and whether it has won', () => {
   assert.deepEqual(tallyOf(vote, 1), { votes: 0, needed: 2, voterIds: [], done: false, mine: false });
   vote.options[1] = { ...vote.options[1], votes: 2, voterIds: ['p_2'] };
   assert.equal(tallyOf(vote, 1).done, true, 'a side at the threshold has won');
+  assert.deepEqual(tallyOf({ options: [] }, 1, 'p_0'), { votes: 0, needed: 1, voterIds: [], done: false, mine: false },
+    'a partial snapshot renders an empty side instead of throwing');
 });
 
 test('promptOptions: the AI side always, a handover side only when a teammate can step in', () => {

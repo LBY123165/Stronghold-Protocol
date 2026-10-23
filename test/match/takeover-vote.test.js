@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeMatch } from './harness.js';
 import { ERR } from '../../shared/constants.js';
+import { TAKEOVER_VOTE_MS } from '../../server/match/match/takeover.js';
 
 const setup = (t, opts = {}) => {
   const h = makeMatch({ humans: 3, fake: true, ...opts }).start();
@@ -34,7 +35,7 @@ test('a disconnected seat without AI control is the one that needs a decision', 
 test('the room votes: an AI takeover needs a majority of the online players', (t) => {
   const h = setup(t);
   const m = h.m;
-  const dropped = dropOut(h);
+  dropOut(h);
 
   // three humans, one is offline: two voters, one vote is the majority
   assert.deepEqual(m.takeoverVoters(), ['p_0', 'p_2']);
@@ -48,6 +49,47 @@ test('the room votes: an AI takeover needs a majority of the online players', (t
   assert.equal(m.takeoverVote, null, 'the vote closed');
   assert.equal(m.players.get('p_1').autoplay, true, 'the disconnected seat is on AI control');
   assert.equal(m.publicView().takeoverVote, undefined, 'a closed vote is not published');
+});
+
+test('the first ballot keeps every other voter eligible and clears the prompt', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  dropOut(h);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  const view = m.publicView().takeoverVote;
+  assert.equal(view.voters.length, 1, 'one ballot has been cast');
+  assert.deepEqual(view.eligible, ['p_0', 'p_2'], 'the other voter is still eligible (the client reads this list)');
+  assert.equal(m.publicView().takeoverPending, undefined, 'the tally replaced the prompt');
+  // the crash state on the client: vote present, prompt absent
+  assert.ok(view);
+  assert.equal(m.handle('p_2', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  assert.equal(m.players.get('p_1').autoplay, true);
+});
+
+test('the vote ceiling fills the seat instead of leaving the decision open forever', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  dropOut(h);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  assert.ok(m.takeoverVote, 'the vote is open with one of two ballots');
+  h.sched.advance(TAKEOVER_VOTE_MS + 1_000);
+  assert.equal(m.takeoverVote, null, 'the ceiling closed the vote');
+  assert.equal(m.players.get('p_1').autoplay, true, 'the leading side (AI) filled the seat');
+  assert.equal(m.publicView().takeoverVote, undefined);
+});
+
+test('a vote that lost its electors cannot be decided by one player; the ceiling still fills the seat', (t) => {
+  const h = setup(t);
+  const m = h.m;
+  dropOut(h);
+  assert.equal(m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' }).ok, true);
+  m.players.get('p_2').connected = false; // the second voter drops while the vote is open
+  assert.deepEqual(m.takeoverVoters(), ['p_0']);
+  const res = m.handle('p_0', { t: 'g.takeoverVote', targetPlayerId: 'p_1', mode: 'bot' });
+  assert.equal(res.error, ERR.BAD_TARGET, 'a room with one online player has nobody to decide');
+  h.sched.advance(TAKEOVER_VOTE_MS + 1_000);
+  assert.equal(m.takeoverVote, null);
+  assert.equal(m.players.get('p_1').autoplay, true, 'the ceiling still fills the seat');
 });
 
 test('the disconnected player cannot decide their own seat', (t) => {

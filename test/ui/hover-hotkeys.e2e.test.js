@@ -1,4 +1,5 @@
-// Real pointer/keyboard regression: Q/X act on the hovered operator without a preceding click.
+// Real pointer/keyboard regression: Q/X act on the selected operator, and on the hovered operator only when
+// nothing is selected (user report: X sold the piece under the pointer instead of the selected one).
 // SP_E2E=1 CHROME_PATH=/path/to/chrome node --test test/ui/hover-hotkeys.e2e.test.js
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Conte
 const ENABLED = process.env.SP_E2E === '1' && existsSync(CHROME);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHROME_PATH to run' }, () => {
+describe('selected / hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHROME_PATH to run' }, () => {
   let srv, browser;
   before(async () => {
     const { startServer } = await import('../../server/index.js');
@@ -19,12 +20,12 @@ describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHR
   after(async () => { await browser?.close(); await srv?.close(); });
 
   for (const mode of ['fallback', '2d', '3d']) {
-    test(`${mode}: no click required; current hover wins over selection; blocked actions stay inert`, async (t) => {
+    test(`${mode}: selected wins; hover only with no selection; blocked actions stay inert`, async (t) => {
       const context = await browser.createBrowserContext();
       t.after(() => context.close());
       const page = await context.newPage();
       const errors = [];
-      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('pageerror', (e) => errors.push(e.stack || e.message));
       await page.setViewport({ width: 1920, height: 1080 });
       const renderer = mode === 'fallback' ? 'fallback' : 'engine';
       await page.goto(`${srv.url}/dev/game-mock.html?shot=1&phase=PREP&variant=temp&render=${renderer}&board=${mode}`, { waitUntil: 'domcontentloaded' });
@@ -68,6 +69,8 @@ describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHR
 
       const initial = await state();
       const [first, selected, other] = initial.board.filter((p) => p.kind === 'chess');
+
+      // nothing selected: the hovered board piece is the target (retreat is reversible)
       await hover(first.uid);
       assert.equal(await page.$('.uframe'), null, 'hovering does not select or open the underframe');
       await page.keyboard.press('KeyQ');
@@ -77,24 +80,29 @@ describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHR
       await inert('Q cannot retreat a bench operator', ['KeyQ']);
       await page.keyboard.press('KeyX');
       await removed(first.uid);
-      assert.equal((await sent()).at(-1)[1].uid, first.uid, 'X sells a bench operator without selecting it');
+      assert.equal((await sent()).at(-1)[1].uid, first.uid, 'X sells a hovered bench operator without a selection');
 
+      // a selection wins over the pointer: hovering another piece must not redirect the sale
       const selectedPoint = await hover(selected.uid);
       await page.mouse.click(selectedPoint.x, selectedPoint.y);
       await page.waitForSelector('.uframe__btn--sell');
-      const oldPoint = await hover(other.uid);
+      const otherPoint = await hover(other.uid);
+      assert.ok(await page.$('.uframe__btn--sell'), 'the click selected the operator, hover another one');
       // Two keydowns in one task, before Preact can update: only one sale may be in flight.
       await page.evaluate(() => {
         for (let i = 0; i < 2; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true }));
       });
-      await removed(other.uid);
+      await removed(selected.uid);
       await sleep(180);
-      assert.equal((await sent()).filter(([type, f]) => type === 'g.sell' && f.uid === other.uid).length, 1);
-      assert.ok((await state()).board.some((p) => p.uid === selected.uid), 'hover overrides the previously selected operator');
-      await page.waitForFunction((x, y) => globalThis.__SP_VIEW__.pieceAtClientPoint(x, y) === null, {}, oldPoint.x, oldPoint.y);
-      await inert('a removed hover target never falls back to the selected operator');
+      assert.equal((await sent()).filter(([type, f]) => type === 'g.sell' && f.uid === selected.uid).length, 1);
+      assert.ok((await state()).board.some((p) => p.uid === other.uid), 'hover does not override the selected operator');
+      await page.waitForFunction((x, y) => globalThis.__SP_VIEW__.pieceAtClientPoint(x, y) === null, {}, selectedPoint.x, selectedPoint.y);
+      await page.mouse.move(selectedPoint.x, selectedPoint.y);
+      await inert('a removed selection is not redirected to the hovered operator');
+
+      // with no selection again, the HUD is inert
       await page.hover('.gm__gear');
-      await inert('HUD does not redirect Q/X to an old selection');
+      await inert('HUD does not redirect Q/X');
       await page.keyboard.press('Escape');
 
       for (const kind of ['item', 'token']) {
@@ -108,25 +116,20 @@ describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHR
       await page.keyboard.press('KeyX');
       await removed(temporary.uid);
 
-      await hover(selected.uid);
-      await page.mouse.down();
-      await inert('holding a mouse button blocks piece shortcuts');
-      await page.mouse.up();
-      await page.keyboard.press('Escape');
-      await hover(selected.uid);
+      await hover(other.uid);
       await page.evaluate(() => window.dispatchEvent(new Event('blur')));
       await inert('losing window focus clears the hover target');
-      await hover(selected.uid);
+      await hover(other.uid);
       await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', clientX: 100, clientY: 100 })));
       await inert('a touch pointer cannot supply a hover target');
 
       await page.click('.gm__gear');
       await page.waitForSelector('.modal .set-keys');
-      await page.mouse.move(selectedPoint.x, selectedPoint.y);
+      await page.mouse.move(otherPoint.x, otherPoint.y);
       await inert('a dialog blocks hovered shortcuts');
       await page.keyboard.press('Escape');
       await page.waitForSelector('.modal', { hidden: true });
-      await hover(selected.uid);
+      await hover(other.uid);
       await page.evaluate(() => {
         const input = document.createElement('input'); input.id = 'hotkey-test-input';
         document.body.append(input); input.focus();
@@ -135,13 +138,18 @@ describe('hovered operator shortcuts', { skip: !ENABLED && 'set SP_E2E=1 and CHR
       await page.evaluate(() => document.querySelector('#hotkey-test-input').remove());
 
       await page.evaluate(() => globalThis.__MOCK__.mutate((s) => { s.priv.ready = true; }));
-      await hover(selected.uid);
+      await hover(other.uid);
       await inert('ready players cannot operate a hovered operator');
       await page.evaluate(() => globalThis.__MOCK__.mutate((s) => { s.priv.ready = false; }));
-      await hover(selected.uid);
-      await page.keyboard.down('KeyX');
-      await removed(selected.uid);
-      await page.keyboard.up('KeyX');
+
+      // a selected operator is still blocked while a mouse button is held (no accidental sale during a drag)
+      const keep = await hover(other.uid);
+      await page.mouse.click(keep.x, keep.y);
+      await page.waitForSelector('.uframe__btn--sell');
+      await page.mouse.down();
+      await inert('holding a mouse button blocks the selected operator shortcut', ['KeyX']);
+      await page.mouse.up();
+      await page.keyboard.press('Escape');
       assert.deepEqual(errors, []);
     });
   }

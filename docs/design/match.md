@@ -165,19 +165,27 @@ Tracked in [issue #338](https://github.com/sganggs/Stronghold-Protocol/issues/33
 - **Who may take the seat.** Online, still alive (an eliminated player has no board to take over with), not on AI 托管
   and not the owner (`takeoverCandidates`) — "有余力" means a player who is not already delegating their own seat.
 - **The tally.** A vote needs `floor(voters / 2) + 1`; the two options are mutually exclusive, so a second vote from
-  the same player withdraws the first one and they may change their mind. The vote opens with the first ballot and
-  closes the moment one side reaches the threshold (`TAKEOVER_VOTE_MS` is the ceiling before the server drops it).
+  the same player withdraws the first one and they may change their mind. The tally publishes two lists: `eligible`
+  (the seats that may vote now) and `voters` (the ballots already cast). The client reads `eligible` for the vote
+  button — using `voters` there locked every other player out after the first ballot. The threshold follows the
+  current eligible seats if one drops mid-vote. The vote opens with the first ballot and closes the moment one side
+  reaches the threshold; after `TAKEOVER_VOTE_MS` the ceiling fills the seat with the leading side (AI on a tie or
+  no ballots), so a room that never decides cannot leave the decision open forever.
 - **The outcome.** `bot` sets `autoplay` on the seat — the same path a disconnected seat is simulated by, so the
-  lineup on the board never changes. `handover` names the teammate who takes the seat and hands it to them. Both
-  outcomes go through the ticker at `FLOW_TICKER_PRIORITY`.
+  lineup on the board never changes. `handover` records the teammate who is to take the seat and names them in the
+  ticker; transferring the disconnected seat's board to that teammate is still a follow-up (the seat keeps its
+  lineup and is simulated until then). Both outcomes go through the ticker at `FLOW_TICKER_PRIORITY`.
 - **The wire.** `m.public` carries `takeoverPending` (the prompt: the seat, its owner, the candidates, the voters)
-  and `takeoverVote` (the tally: each side's count, its voter ids, the candidate, the threshold) — both absent when
-  there is no decision, so a normal `m.public` stays byte-identical. `g.takeoverVote { targetPlayerId, mode,
-  candidatePlayerId? }` is the only client→match intent, and it is a player-seat intent only (a spectator seat's
-  ballot is refused with `SPECTATOR`, like every other intent it may not send).
+  and `takeoverVote` (the tally: each side's count, its voter ids, the `eligible` electorate, the candidate, the
+  threshold and `endsAt`) — both absent when there is no decision, so a normal `m.public` stays byte-identical.
+  `g.takeoverVote { targetPlayerId, mode, candidatePlayerId? }` is the only client→match intent, and it is a
+  player-seat intent only (a spectator seat's ballot is refused with `SPECTATOR`, like every other intent it may not
+  send).
 
 The overlay (`public/js/ui/takeover.js`, `TakeoverHost`) is mounted over any route in `main.js`, because a seat may
-drop in any phase. It renders nothing while neither `takeoverPending` nor `takeoverVote` is present.
+drop in any phase. It renders nothing while neither `takeoverPending` nor `takeoverVote` is present. It can be folded
+into a small chip at the right edge (and folds itself after 10 s), so it does not cover the board while the room
+decides; the vote stays open and the chip keeps the seat, the tally and the remaining time one click away.
 
 ---
 
