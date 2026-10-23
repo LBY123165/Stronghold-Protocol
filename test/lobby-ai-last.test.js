@@ -1,6 +1,7 @@
-// test/lobby-ai-last.test.js — the co-op room option 「AI 队友最后选择」 (room.setAiPicksLast {on}; GitHub #338): host-only,
-// before the match only, co-op rooms only, off by default; room.state.aiPicksLast shows it to everybody; the match gets
-// it as opts.aiPicksLast when it starts (server/match/Match.js orders the drafts with it — test/match/ai-picks-last.test.js).
+// test/lobby-ai-last.test.js — the co-op rule 「AI 队友最后选择」 (GitHub #338; room.setAiPicksLast stays for the protocol):
+// in this capacity branch it is FIXED ON for co-op rooms (manual players always pick first — server/lobby.js refuses to
+// turn it off) and off in solo; room.state.aiPicksLast shows it to everybody; the match gets it at its start
+// (server/match/Match.js orders the drafts with it — test/match/ai-picks-last.test.js).
 import { describe, test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -74,24 +75,17 @@ describe('room.setAiPicksLast (lobby)', () => {
     assert.deepEqual(cap.errors, [], 'no server errors logged');
   });
 
-  test('off by default; host-only; every seat sees it in room.state; a change un-readies the guests like the difficulty', async () => {
+  test('fixed on in co-op (capacity branch): host-only; every seat sees it in room.state; turning it off is refused', async () => {
     const host = await pool.player('Host');
     const st = await createRoom(host);
-    assert.equal(st.aiPicksLast, false);
+    assert.equal(st.aiPicksLast, true);
     const guest = await pool.player('Guest');
     const js = await joinRoom(guest, st.code);
-    assert.equal(js.aiPicksLast, false);
+    assert.equal(js.aiPicksLast, true);
     await err(guest, { t: 'room.setAiPicksLast', on: true }, ERR.NOT_HOST);
-    await ok(guest, { t: 'room.ready', ready: true });
-    await host.waitFor('room.state', (s) => seatOf(s, guest.id)?.ready);
+    await err(host, { t: 'room.setAiPicksLast', on: false }, ERR.BAD_TARGET);
+    // asking for the fixed value again is ok (and changes nothing)
     await ok(host, { t: 'room.setAiPicksLast', on: true });
-    const on = await guest.waitFor('room.state', (s) => s.aiPicksLast === true);
-    assert.equal(seatOf(on, guest.id).ready, false, 'the rules changed: the guest confirms again');
-    await host.waitFor('room.state', (s) => s.aiPicksLast === true);
-    // the same value again changes nothing (no broadcast needed, still ok)
-    await ok(host, { t: 'room.setAiPicksLast', on: true });
-    await ok(host, { t: 'room.setAiPicksLast', on: false });
-    await guest.waitFor('room.state', (s) => s.aiPicksLast === false);
     // a malformed value never reaches the lobby
     await err(host, { t: 'room.setAiPicksLast', on: 'yes' }, ERR.BAD_MSG);
   });
@@ -103,13 +97,12 @@ describe('room.setAiPicksLast (lobby)', () => {
     await err(host, { t: 'room.setAiPicksLast', on: true }, ERR.BAD_TARGET);
   });
 
-  test('the match gets it at the start; it cannot change during the match; the room keeps it for the next match and a new host', async () => {
+  test('the match gets it fixed on; it cannot change during the match; the room keeps it for the next match and a new host', async () => {
     const host = await pool.player('Host');
     const st = await createRoom(host);
     const guest = await pool.player('Guest');
     await joinRoom(guest, st.code);
     await ok(host, { t: 'room.addBot' });
-    await ok(host, { t: 'room.setAiPicksLast', on: true });
     await ok(guest, { t: 'room.ready', ready: true });
     await host.waitFor('room.state', (s) => s.aiPicksLast && seatOf(s, guest.id)?.ready);
     const n = started.length;
@@ -119,7 +112,7 @@ describe('room.setAiPicksLast (lobby)', () => {
     assert.equal(started[n].aiPicksLast, true, 'opts.aiPicksLast');
     await err(host, { t: 'room.setAiPicksLast', on: false }, ERR.ROOM_STARTED);
     await err(guest, { t: 'room.setAiPicksLast', on: false }, ERR.NOT_HOST);
-    // the stub match ends once every human confirmed the briefing → back in the lobby with the option kept
+    // the stub match ends once every human confirmed the briefing → back in the lobby with the rule kept
     guest.clearInbox();
     await ok(host, { t: 'g.infoReady' });
     await ok(guest, { t: 'g.infoReady' });
@@ -129,14 +122,13 @@ describe('room.setAiPicksLast (lobby)', () => {
     await ok(host, { t: 'room.leave' });
     const migrated = await guest.waitFor('room.state', (s) => s.hostId === guest.id);
     assert.equal(migrated.aiPicksLast, true);
-    await ok(guest, { t: 'room.setAiPicksLast', on: false });
-    await guest.waitFor('room.state', (s) => s.aiPicksLast === false);
+    // the new host cannot turn the fixed rule off either
+    await err(guest, { t: 'room.setAiPicksLast', on: false }, ERR.BAD_TARGET);
   });
 
-  test('without the option the match gets aiPicksLast false', async () => {
+  test('solo: the match gets aiPicksLast false', async () => {
     const host = await pool.player('Host');
-    await createRoom(host);
-    await ok(host, { t: 'room.addBot' });
+    await createRoom(host, 'solo');
     const n = started.length;
     await ok(host, { t: 'room.start' });
     await host.waitFor('room.state', (s) => s.inMatch);

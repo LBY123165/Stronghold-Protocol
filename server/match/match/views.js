@@ -87,6 +87,10 @@ export class MatchViews {
         voters: this.setupVote.voters.slice(),
         agreed: [...this.setupVote.agreed],
       } : null,
+      // 断线接管投票 (GitHub #338 follow-up): the open vote about a disconnected seat, and the seat that waits
+      // for the room's decision. Absent when there is none, so a normal m.public stays identical.
+      ...(this.takeoverVote ? { takeoverVote: this.takeoverVoteView() } : {}),
+      ...(this.takeoverPending ? { takeoverPending: this.takeoverPendingView() } : {}),
       factions: this.factions.slice(),
       disabledBonds: [...new Set([...this.disabledBonds, ...this.staticInactiveBonds])].sort(),
       drawnDisabledBonds: this.disabledBonds.slice(),
@@ -139,6 +143,13 @@ export class MatchViews {
         return v;
       }),
     };
+    // Full public snapshots replace the previous state. Omit inactive protection fields from the normal hot path;
+    // their absence in the recovery snapshot also clears the client's frozen state.
+    if (this.emergencyFrozen) {
+      v.emergencyFrozen = true;
+      v.emergencyFrozenAt = this.emergencyFrozenAt;
+      v.emergencyReason = this.emergencyReason;
+    }
     if (this.offers.length) v.offers = this.offerViews();
     if (this.teamLp != null) v.teamLp = Math.max(0, Math.round(this.teamLp));
     // 最终攻势 / 隐秘核心: when the overtime drain starts (ms epoch; `deadline` is the level's 120 s countdown)

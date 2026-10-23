@@ -57,6 +57,18 @@ async function drive(c, opts) {
   try { await driveLoop(c, opts); } catch (e) { abort = true; throw e; }
 }
 
+/**
+ * g.band band_bldsk on the client's turn. A pick that loses the race against a skip's re-order (NOT_YOUR_TURN) is not
+ * counted and retried on the next turn frame — only a refused pick (队友已选, the turn's default then applies) or a real
+ * timeout counts toward the "drafted a band (or its turn timed out)" assertion.
+ */
+async function pickBand(c, stats, key, done) {
+  const r = await c.request({ t: 'g.band', bandId: 'band_bldsk' });
+  if (r.t === 'ok') stats.bands++;
+  else if (r.t === 'error' && r.code === 'NOT_YOUR_TURN') done.delete(key);
+  else stats.bandTimeouts++;
+}
+
 async function driveLoop(c, { skipOnce = false, until, stats }) {
   const done = new Set();
   let skipped = !skipOnce;
@@ -70,22 +82,25 @@ async function driveLoop(c, { skipOnce = false, until, stats }) {
     if (pub.phase === 'INFO_CHECK' && !done.has('info')) {
       done.add('info');
       assert.equal((await c.request({ t: 'g.infoReady' })).t, 'ok');
-    } else if (pub.phase === 'BAND_DRAFT' && pub.draft && pub.draft.turn === c.id) {
-      const key = `band:${pub.draft.order.join()}`;
+    // the fixed-on capacity branch re-prioritizes the order after every skip (a skip passes to the other manual human and
+    // can restore the drawn order): the dedupe key carries whether this client has skipped already, and the turn gate
+    // checks the player's own pick, so a restored order still gets its pick instead of only the timeout default
+    } else if (pub.phase === 'BAND_DRAFT' && pub.draft && pub.draft.turn === c.id && !pub.draft.picks[c.id]) {
+      const key = `band:${pub.draft.order.join()}:${skipped ? 'pick' : 'skip'}`;
       if (done.has(key)) continue;
       done.add(key);
       const last = pub.draft.order.indexOf(c.id) === pub.draft.order.length - 1;
       if (!skipped && !last) {
         skipped = true;
         const r = await c.request({ t: 'g.bandSkip' });
-        // a slow client may lose its (scaled) turn to the timer before the skip arrives
+        // a slow client may lose its (scaled) turn to the timer before the skip arrives; with no manual teammate behind
+        // (the other human already picked, disconnected or departed) the skip is refused and the client picks instead
         if (r.t === 'ok') stats.skips++;
+        else if (r.t === 'error' && r.code === 'BAD_TARGET') await pickBand(c, stats, key, done);
         else assert.ok(['NOT_YOUR_TURN', 'ALREADY'].includes(r.code), `bandSkip: ${JSON.stringify(r)}`);
         stats.skipTries++;
       } else {
-        const r = await c.request({ t: 'g.band', bandId: 'band_bldsk' });
-        if (r.t === 'ok') stats.bands++;
-        else stats.bandTimeouts++;
+        await pickBand(c, stats, key, done);
       }
     } else if (pub.phase === 'SP_DRAFT' && pub.sp && pub.sp.turn === c.id) {
       const key = `sp:${pub.round}`;

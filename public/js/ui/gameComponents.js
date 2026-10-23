@@ -12,9 +12,10 @@ import {
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
-/** Data files the in-match screens use (`backups`: the 补位 stand-ins' bodies — cards, the board model, the detail card). */
+/** Data files the in-match screens use (`backups`: the 补位 stand-ins' bodies — cards, the board model, the detail card;
+ *  `skins`: the 干员皮肤 catalogue of docs/SKINS.md, read by the detail card's 皮肤 section). */
 export const GAME_FILES = ['config', 'assets', 'chess', 'bonds', 'items', 'bands', 'enemies', 'bosses', 'stages', 'tokens',
-  'choices', 'effects', 'garrisons', 'factions', 'local', 'backups'];
+  'choices', 'effects', 'garrisons', 'factions', 'local', 'backups', 'skins'];
 
 /**
  * Load every in-match data file; returns lookups (sync, null until loaded).
@@ -68,9 +69,17 @@ export function Img({ src, class: cls, alt = '', fallback = null, style }) {
   return html`<img class=${cls} src=${src} alt=${alt} draggable=${false} loading="lazy" style=${style} onError=${() => setBad(src)} />`;
 }
 
-/** Official UI sprite by 'group/key' with a fallback. */
+/**
+ * Official UI sprite by 'group/key' with a fallback.
+ *
+ * The art manifest is downloaded asynchronously (data.get('assets') is empty until it lands), so the sprite
+ * subscribes to it: without that, a sprite rendered before the manifest arrived kept its fallback for the rest
+ * of the page's life — an image that never appeared, or an animated one frozen on its first frame.
+ */
 export function Sprite({ k, class: cls, fallback = null }) {
-  return html`<${Img} src=${uiUrl(data.get('assets'), k)} class=${cx('sprite', cls)} fallback=${fallback} />`;
+  const ready = useData('assets');
+  const src = ready ? uiUrl(data.get('assets'), k) : null;
+  return html`<${Img} src=${src} class=${cx('sprite', cls)} fallback=${fallback} />`;
 }
 
 /**

@@ -175,6 +175,10 @@ otherwise every "之后 / 后续的每场作战" card — e.g. 教鞭's 法术�
 A `choice:<effectId>` registry handler overrides the default application (§2.4).
 
 ### 1.3 Disconnects, AI takeover
+* Capacity-fork owner precache admission applies to new create/join/quick-match/spectate requests only, before
+  membership changes. Existing player/spectator token resume and same-role room resync retain their former rules.
+  The optional readiness report and tiny server summary are specified in [ASSET_CACHE.md](ASSET_CACHE.md) and
+  [SERVER_SETTINGS.md](SERVER_SETTINGS.md); compact-v1 uses its existing extension slot.
 * Local multi-window recovery (#431, DESIGN §28.27) sends optional `hello.noReplace` for a tentative shared token,
   and `hello.claimAt` for a previously welcomed token. Before binding a different socket, the server rejects a
   connected seat when no replacement was allowed or the request has a later stamp than the attached holder
@@ -203,6 +207,10 @@ always. While paused (`m.public.paused`) the field clocks, the authority deadlin
 (overtime drain, silence watchdog) and the server pacers stand still; `_resume()` shifts `deadline`, `overtimeAt`, the
 fields' `startAt` / `lastProgressAt` and the boss start by the paused time and re-arms the timers. A disconnect or
 `onLeave` resumes; the battle phase ending clears it (`pausedMs` totals the paused time).
+
+### 1.3b Bandwidth emergency protection (fork)
+
+`Match.setEmergencyFreeze` is separate from solo `g.pause`: `FreezeScheduler` holds all phase timers and AI intervals, and `m.public.emergencyFrozen` marks a held match. Clients stop local battles and countdowns; advancing intents and battle reports temporarily return `SERVER_EMERGENCY`. Recovery preserves remaining delays and shifts deadlines / field clocks without replaying missed ticks. Disconnect and leave update seat connectivity immediately but defer gameplay consequences; original members can reconnect during protection. The last human explicitly abandoning a match still ends it. Automatic retry defaults to 120 seconds and waits longer while known gameplay connections remain congested or a match has no connected humans. Detection, admission, notification limits and configuration are documented in [ASSET_CACHE.md](ASSET_CACHE.md#带宽紧急保护).
 
 ### 1.4 Watching fields
 Client-side combat (the default, DESIGN §14 Spectating; `Match._watchClient`): `g.watch` answers with the field's

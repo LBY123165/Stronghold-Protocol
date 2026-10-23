@@ -19,6 +19,8 @@ data/local-assets.json
 data/local-fx.json
 # download caches, upstream tables, ledgers, reports, setup state
 .cache/
+# Per-server published announcements and command data; never shipped with source.
+/runtime/
 # a worktree that links these folders instead of holding them: git sees a symlink as a file, which the patterns
 # above (trailing slash: directories only) do not match
 /node_modules
@@ -68,3 +70,4 @@ public/dev/simcheck/data/
 
 # generated skin plugins (game art never enters git; tools/skins-plugin.mjs rebuilds them)
 plugins/stronghold-skins*/
+/.workbuddy

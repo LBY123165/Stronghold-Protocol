@@ -306,7 +306,11 @@ export class MatchPhases {
     if (d.picks[ps.playerId]) return fail(ERR.ALREADY);
     if (this.draftTurn(ps.playerId) !== ps.playerId) return fail(ERR.NOT_YOUR_TURN);
     if (!(g.skipsLeft[ps.playerId] > 0)) return fail(ERR.ALREADY, 'no skip left');
-    if (!g.order.slice(g.idx + 1).some((pid) => !d.picks[pid] && this.manualDraftPicker(this.players.get(pid)))) {
+    // A skip hands the turn on: there has to be somebody behind who can still pick. In this capacity branch only a
+    // manual picker counts (an AI or 托管 seat takes its turn on its own), so a remaining AI seat is no successor.
+    const successors = g.order.slice(g.idx + 1).filter((pid) => !d.picks[pid]);
+    if (!successors.length) return fail(ERR.BAD_TARGET, 'nobody to pass to');
+    if (!successors.some((pid) => this.manualDraftPicker(this.players.get(pid)))) {
       return fail(ERR.BAD_TARGET, 'no manual teammate to pass to');
     }
     g.skipsLeft[ps.playerId]--;

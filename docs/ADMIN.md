@@ -1,0 +1,150 @@
+# 运维后台（/admin）
+
+一个给**服主**用的只读监控 + 少量显式动作的网页控制台。默认**关闭**，配了密钥才出现。
+
+## 1. 设计取舍（先看这三条，能省你很多疑问）
+
+1. **没有默认口令。** 没配 `ADMIN_SECRET`（或 `ADMIN_SECRET_FILE`）时，`/admin` 与 `/api/admin/*` 一律返回 **404**，和任何不存在的路径一样。忘了配 = 没有后台，而不是"用弱口令的后台"。
+2. **设置是只读的。** `server/serverSettings.js` 开头写明「Private per-server settings … **no HTTP administration endpoint**」——这是本项目有意为之（AI 上限、预缓存准入、素材限速都走 CLI）。后台**显示**这些值，改还是用 `node tools/server-settings.mjs`。
+3. **维护模式复用服务器自己的保护机制**，不是新开关：它调用的是带宽保护那条路径（`bandwidthEmergency.trip`），所以客户端显示的、行为上都和以前一致。
+
+## 2. 启用
+
+**方式一：环境变量**（`/etc/stronghold/stronghold.env`）
+
+```ini
+ADMIN_SECRET=把 openssl rand -hex 32 的输出贴这里     # 至少 16 个字符，否则后台仍然关闭
+```
+
+**方式二：密钥文件**（推荐，进程环境里看不到，`ps eww` 也看不到）
+
+```ini
+ADMIN_SECRET_FILE=/etc/stronghold/admin.secret
+```
+
+```bash
+sudo install -m 640 -o root -g stronghold /dev/null /etc/stronghold/admin.secret
+openssl rand -hex 32 | sudo tee /etc/stronghold/admin.secret >/dev/null
+sudo chmod 640 /etc/stronghold/admin.secret && sudo chown root:stronghold /etc/stronghold/admin.secret
+sudo systemctl restart stronghold
+```
+
+`scripts/install-service-linux.sh` 会替你生成这个文件。改完重启服务，然后访问 `https://<你的域名>/admin`。
+
+## 3. 认证
+
+| 方式 | 用法 | 说明 |
+|---|---|---|
+| 登录表单 | 浏览器打开 `/admin`，输入密钥 | 成功后下发一个 **HttpOnly / SameSite=Strict / Path=/** 的 Cookie |
+| Bearer | `curl -H "Authorization: Bearer $ADMIN_SECRET" …` | 给脚本用；不要把它写进 shell 历史 |
+
+细节：
+
+- 比较用 `crypto.timingSafeEqual`（定长、常量时间）。
+- Cookie 里的值**不是密钥**，而是**每次进程启动新生成的 24 字节随机串**；重启服务即全部失效。
+- 请求走 TLS 时（`req.socket.encrypted` 或 `X-Forwarded-Proto: https`）Cookie 额外带 `Secure`。
+- 登录失败限流：**同一来源 5 分钟内 8 次**，超出返回 `429` + `Retry-After`（成功即清零）。
+- 密钥长度 / 来源 / 失败尝试都会记到服务端日志。
+
+## 4. 端点
+
+全部返回 `application/json` 且 `Cache-Control: no-store`。除登录/登出外都需要认证。
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/admin` | 控制台页面（无需登录也返回页面骨架，但拉不到任何数据） |
+| POST | `/api/admin/login` | `{ secret }` → 200 + 下发 Cookie；401 密钥错；429 被限流 |
+| POST | `/api/admin/logout` | 清除 Cookie |
+| GET | `/api/admin/overview` | 版本/构建/Node、主机（CPU 核数、负载、内存）、进程（RSS/堆/运行时长）、网络（连接/会话/在线玩家/拥塞）、房间计数、维护状态、素材预缓存状态、**服务器设置（只读）**、日志环形缓冲大小 |
+| GET | `/api/admin/rooms` | 每个房间一条：房间号、模式、难度、**容量**、真人/AI/观战数、是否进行中、**对局阶段与回合**、**固定卡池组（A–E，含成员与倍率）**、房主、存在时长、席位明细 |
+| GET | `/api/admin/logs?since=&limit=` | 增量日志：`entries[{seq,at,level,text}]` + `nextSeq`（`since=0` 表示最近 limit 条，limit 上限 400） |
+| POST | `/api/admin/broadcast` | `{ text, kind }` → 给**每个在线连接**推一条提示（`kind`: `info`/`success`/`warn`/`error`），同时进顶部滚动条。text 上限 300 字（超长截断，不报错），空白返回 400 |
+| POST | `/api/admin/maintenance` | `{ on: true|false }` → 维护模式开关。**响应先发、开关后生效**（见下） |
+| POST | `/api/admin/rooms/close` | `{ code }` → 关掉一个房间，里面的人收到 `room.closed{reason:"admin"}` 回到大厅；房间不存在返回 404 |
+| GET | `/api/admin/accounts?q=` | 账号列表（`q` 按用户名片段过滤，大小写不敏感）：用户名、注册时间、皮肤数、登录设备数、是否封禁。**绝不返回密码哈希、salt 或 token** |
+| POST | `/api/admin/accounts/password` | `{ username, password }` → 重置密码。密码至少 8 位；**该账号的所有登录设备被登出**（token 清空） |
+| POST | `/api/admin/accounts/ban` | `{ username, banned, reason? }` → 封禁/解封。封禁后该账号无法登录，已登录的设备被登出，**账号数据保留**，可随时解封 |
+| POST | `/api/admin/accounts/delete` | `{ username }` → 永久删除账号（密码、皮肤、token 全清），**用户名被释放**，可重新注册 |
+| GET | `/api/admin/announcements` | 公告目录：`revision`、`pinnedId`、`items[{id,title,publishedAt,revision,bytes,pinned}]`（仅元数据，不含正文） |
+| GET | `/api/admin/announcements?id=` | 单条公告的**已校验正文**（`markdown`）+ 元数据；ID 未知/正文不可读返回 404 |
+| POST | `/api/admin/announcements/publish` | `{ id?, title, markdown, pin? }` → 发布新公告。`id` 省略则自动生成（`ann-<时间36进制>-<uuid前缀>`）；**同 ID 不可重发**（改正文请换新 ID）。正文上限 128 KiB |
+| POST | `/api/admin/announcements/pin` | `{ id }` → 设为唯一置顶公告（自动取消原置顶）；ID 不存在返回 400 |
+| POST | `/api/admin/announcements/unpin` | `{}` → 取消置顶，目录不变 |
+| POST | `/api/admin/announcements/notify` | `{ id }` → 向**当前在线玩家**弹该公告（含正在对局中的）。只能指定已发布的公告；成功仅代表**已写入命令槽**，约 1 秒内由运行中的服务器投递 |
+
+错误码：`400 BAD_BODY`、`401 UNAUTHORIZED`/`BAD_SECRET`、`404 NOT_FOUND`（未知端点或房间不存在）、`405 METHOD_NOT_ALLOWED`（已知端点用了错方法）、`413 BODY_TOO_LARGE`（> 8 KB；公告发布端点放宽到 96 KB）、`429 TOO_MANY_ATTEMPTS`、`503 UNAVAILABLE`（本部署没有带宽控制，无法维护模式；或本部署没有启用账号/公告功能）。
+
+## 4.1 账号管理
+
+控制台的「账号」区块列出所有账号，支持按用户名搜索，提供三个操作：
+
+| 操作 | 行为 | 注意 |
+|---|---|---|
+| **重置密码** | 设置新密码 | 该账号的所有设备必须重新登录（旧 token 全部失效） |
+| **封禁 / 解封** | 封禁后无法登录 | 数据保留，随时可解封；封禁会登出该账号的所有设备 |
+| **删除** | 永久删除 | 不可恢复，用户名被释放 |
+
+删除需要再输一次用户名确认。账号名规则与玩家端一致（3–24 个字符，含至少一个字母或数字，见 `shared/account.js`）。
+
+账号功能是**可选**的：服务器没有启用账号（`createAccountStore` 未装配）时，这些端点返回 `503 UNAVAILABLE`，控制台的账号区块显示「这台服务器没有启用账号功能」。
+
+## 5. 维护模式到底做了什么
+
+开启后：
+
+- **拒绝新访问**：建房、加入、观战、开局、快速匹配、大厅目录订阅都被拒（已有的人不踢）。
+- **冻结进行中的对局**：客户端会显示保护状态，倒计时停住，断线保留窗口顺延。
+- **切断普通 HTTP 连接**并暂停素材预缓存下载。
+- **后台本身不受影响**：`/admin` 与 `/api/admin/*` 在保护闸门**之前**被应答，所以你在维护中依然能看、能广播、能关闭维护（这一点是刻意做的——否则开维护的那一刻自己就被踢出控制台了）。
+- **不自动恢复**：手动开的维护模式**不会**在 2 分钟后自己解除（自动触发的带宽保护才是自动恢复的）。想解除只能点「关闭」或调 `POST /api/admin/maintenance {on:false}`。
+- `/healthz` 在维护期间**仍然返回 200**：给编排器/监控探活用。
+
+`POST /api/admin/maintenance` 的响应总是先发出，再真正切换保护状态——因为开启保护会断开普通 HTTP 连接，如果先切，触发这个动作的请求自己就会被切断，控制台会报"网络错误"而其实已经成功。
+
+## 6. 安全建议
+
+1. **一定要 TLS**。没有 HTTPS 时密钥和 Cookie 是明文，公网上等于公开。
+2. 反向代理里再限制一层来源 IP：`deploy/nginx-stronghold.conf` 里 `/admin` 与 `/api/admin/` 两段有 `allow`/`deny` 模板（默认是示例 IP，**记得改**）。
+3. 密钥用文件而不是环境变量（`ADMIN_SECRET_FILE`），文件 `640 root:stronghold`。
+4. 不要把密钥贴进 Issue、截图或 shell 历史；轮换就是改文件内容 + `systemctl restart stronghold`。
+5. 关掉后台 = 把 `ADMIN_SECRET`/`ADMIN_SECRET_FILE` 都清掉并重启（回到 404）。
+
+## 7. 快速验证（curl）
+
+```bash
+BASE=https://game.example.com
+SECRET=$(sudo cat /etc/stronghold/admin.secret)
+
+# 没登录：401
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/admin/overview
+
+# 带 Bearer：200，看一遍概览
+curl -s -H "Authorization: Bearer $SECRET" $BASE/api/admin/overview | head -c 400
+
+# 房间（20 人房里能看到 poolGroups 是 5 组 4 人）
+curl -s -H "Authorization: Bearer $SECRET" $BASE/api/admin/rooms
+
+# 全服广播
+curl -s -H "Authorization: Bearer $SECRET" -H 'content-type: application/json' \
+  -d '{"text":"22:30 维护重启，请提前结束本局","kind":"warn"}' $BASE/api/admin/broadcast
+
+# 维护模式开/关
+curl -s -H "Authorization: Bearer $SECRET" -H 'content-type: application/json' -d '{"on":true}'  $BASE/api/admin/maintenance
+curl -s -H "Authorization: Bearer $SECRET" -H 'content-type: application/json' -d '{"on":false}' $BASE/api/admin/maintenance
+```
+
+## 8. 已知未做（有意保持小）
+
+- **不能改服务器设置**：只读展示，写入在 CLI（见 §1 第 2 条）。
+- **不能踢单个玩家**：只能关整个房间（`rooms/close`）。房主自己可以在游戏里踢人。
+- **不改房间容量/difficulty**：这些是房主的权力，后台不越权。
+- **不能看账号的密码或 token**：只有重置，没有查看；控制台也从不返回哈希、salt 或 token。
+- **没有审计日志文件**：动作会写进服务端日志（`journalctl -u stronghold`），但不会单独落盘。
+- 需要这些的话，扩展点在 `server/admin.js`（服务）+ `server/http/admin.js`（路由）+ `public/admin/admin.js`（面板），三层都很小。
+
+## 9. 相关
+
+- 部署：[DEPLOY-LINUX.md](DEPLOY-LINUX.md)、[DEPLOY-QUICKSTART.md](DEPLOY-QUICKSTART.md)
+- 素材预缓存（后台能看到状态）：[ASSET_CACHE.md](ASSET_CACHE.md)
+- 服务器设置（后台只读的那些值）：`tools/server-settings.mjs --help`
+- 带宽保护的阈值与行为：`server/bandwidthEmergency.js` 头部注释

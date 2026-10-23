@@ -139,9 +139,13 @@ export class MatchPlatform {
       this.cancelSetupVote();
       // a paused solo battle resumes (the server takes the field over; nobody is left to resume it)
       this._resume();
-      if (this.clientCombat) this._authorityLost(ps, 'disconnect');
+      // 带宽应急保护: the gameplay consequences of a frozen match's disconnects apply once, on recovery
+      if (this.emergencyFrozen) this._emergencyLostAuthorities.add(playerId);
+      else if (this.clientCombat) this._authorityLost(ps, 'disconnect');
       // a rehearsal this host was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
+      // 断线接管: the room decides how this seat is filled, unless the player comes back in time
+      this.scheduleTakeover(playerId);
       this.markPublic();
     });
   }
@@ -154,6 +158,8 @@ export class MatchPlatform {
       ps.connected = true;
       this.refreshDraftPriority(playerId);
       this.refreshUniteSkipVote();
+      // 断线接管: the player is back, so the room is not asked to decide this seat any more
+      this.cancelTakeover(playerId);
       this._resync(ps);
       if (!was) this.markPublic();
     });
@@ -196,7 +202,9 @@ export class MatchPlatform {
       this.watchers.delete(playerId);
       if (this.ended) return;
       this._resume();
-      if (this.clientCombat) this._authorityLost(ps, 'left');
+      // 带宽应急保护: the gameplay consequences of a frozen match's departures apply once, on recovery
+      if (this.emergencyFrozen) this._emergencyLostAuthorities.add(playerId);
+      else if (this.clientCombat) this._authorityLost(ps, 'left');
       // a rehearsal the departed seat was running falls back to the server (DESIGN §14; a no-op without tasks)
       this._rehearsalHostChanged();
       this.markPublic();
@@ -275,6 +283,8 @@ export class MatchPlatform {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this._emergencyLeaves.clear();
+    this._emergencyLostAuthorities.clear();
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } }
     this._stopClientCombat();
     this._cancelRehearsal();
@@ -282,6 +292,7 @@ export class MatchPlatform {
     if (typeof this.offersDispose === 'function') { try { this.offersDispose(); } catch { /* ignore */ } }
     for (const h of this._timers) { try { this.sched.clearTimeout(h); } catch { /* ignore */ } }
     this._timers.clear();
+    this._takeoverGrace.clear();
     if (this._pubTimer) { try { this.sched.clearTimeout(this._pubTimer); } catch { /* ignore */ } this._pubTimer = null; }
     this.sched.dispose();
   }

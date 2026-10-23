@@ -52,14 +52,22 @@ import { createMatchHosts } from './match/host/index.js';
 import { createTrustedRuntime } from './plugins/trustedRuntime.js';
 import { trustedHostAllowed } from './plugins/trusted.js';
 import { createStudio } from './studio/index.js';
+import { createAnnouncementStore } from './announcements.js';
+import { createAnnouncementNoticeMonitor } from './announcementNotices.js';
+import { createServerSettings } from './serverSettings.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, pickEncoding, parseRange } from './http/files.js';
 import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/buildTag.js';
 import { createRequestHandler } from './http/routes.js';
 import { createTrafficCounter } from './http/traffic.js';
 import { createAssetIndex } from './http/assetIndex.js';
 import { createManifestViews } from './http/assetViews.js';
+import { createAssetCacheHandler } from './http/assetCache.js';
+import { createBandwidthEmergencyController, bandwidthEmergencyOptions } from './bandwidthEmergency.js';
 import { answerClientError } from './http/common.js';
 import { lanUrls, displayHost, isProcessEntry, runMain } from './http/boot.js';
+import { createAdminService, createLogRing, readAdminSecret, withLogRing } from './admin.js';
+import { createAdminHandler } from './http/admin.js';
+import { createAccountStore } from './accounts.js';
 
 // The public API of this module (tests and tools import it from here); the code lives in ./http/.
 export {
@@ -72,13 +80,17 @@ export {
  * @param {{
  *   port?: number, host?: string, quiet?: boolean, log?: object,
  *   publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, pluginsDir?: string,
+ *   announcementsDir?: string, serverSettingsDir?: string, accountsFile?: string,
  *   MatchClass?: Function, seedFn?: () => number,
  *   lobbyGraceMs?: number, reconnectWindowMs?: number, heartbeatMs?: number, helloTimeoutMs?: number,
- *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number,
+ *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number, compactWire?: boolean, runtimeCache?: boolean,
  *   maxConnectionsPerAddr?: number, maxRoomsPerAddr?: number, maxMatchesPerAddr?: number, resyncMinGapMs?: number,
  *   heavyPerSec?: number, heavyBurst?: number, trustProxy?: 'auto' | boolean, soloReconnectWindowMs?: number,
  *   assetIndex?: boolean | { cacheFile?: string | null, delayMs?: number }, studio?: boolean,
  *   matchHost?: object,
+ *   assetCacheLimits?: { totalBps?: number, clientBps?: number, maxDownloads?: number, maxDownloadsPerClient?: number },
+ *   assetCacheBuildCatalog?: Function,
+ *   bandwidthEmergency?: object | false,
  * }} [opts]
  *   assetIndex: the content-hash index (default on; false or SP_ASSET_INDEX=0: off — config.js assetIndexOptionsFrom);
  *   studio: the plugin studio at /studio/ (default on for this machine and the local network — SP_STUDIO=local|off;
@@ -91,11 +103,21 @@ export {
  *                     contents: ReturnType<typeof createContentSets>, hosts: ReturnType<typeof createMatchHosts>,
  *                     traffic: ReturnType<typeof createTrafficCounter>, assetIndex: ReturnType<typeof createAssetIndex> | null,
  *                     views: ReturnType<typeof createManifestViews> | null, studio: ReturnType<typeof createStudio> | null,
+ *                     announcements: ReturnType<typeof createAnnouncementStore>,
+ *                     serverSettings: ReturnType<typeof createServerSettings>,
  *                     close: () => Promise<void> }>}
  */
 export async function startServer(opts = {}) {
+  // Validate operator options before starting any session/watch timers.
+  const emergencyOptions = bandwidthEmergencyOptions(opts.bandwidthEmergency === false ? { enabled: false } : opts.bandwidthEmergency || {});
   const { port, host } = listenAddress(opts);
-  const log = opts.log || makeLogger(!!opts.quiet);
+  const baseLog = opts.log || makeLogger(!!opts.quiet);
+  // 运维后台 (docs/ADMIN.md): mirror the process log into a bounded ring so the console can show recent lines. A new
+  // logger object wraps it (never the caller's object, which may be a shared singleton). Off unless a secret is set.
+  // `opts.adminSecret` is for tests and embedders; the environment (ADMIN_SECRET / ADMIN_SECRET_FILE) is the normal path.
+  const adminSecret = readAdminSecret(opts.adminSecret ? { ...process.env, ADMIN_SECRET: String(opts.adminSecret), ADMIN_SECRET_FILE: '' } : process.env);
+  const logRing = createLogRing();
+  const log = adminSecret.secret ? withLogRing(baseLog, logRing) : baseLog;
   const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);
   const simDir = path.join(ROOT, 'server', 'sim');
 
@@ -109,6 +131,15 @@ export async function startServer(opts = {}) {
   // whenever their folders change
   const scriptMode = process.env.SP_PLUGIN_SCRIPTS;
   const packs = createPluginRegistry({ publicDir, dataDir, packsDir, pluginsDir }, { log, scriptHost:host, scriptMode });
+  // 运维设置 (docs/SERVER_SETTINGS.md): the owner's per-room AI limit and the asset-cache admission, watched for runtime
+  // changes (applySettings below is hoisted; it runs only once the lobby and the asset cache exist)
+  const serverSettings = createServerSettings({ dir: opts.serverSettingsDir, root: ROOT, log,
+    onChange: (next) => applySettings(next) });
+  // 账号 (docs/ACCOUNT.md): registered players, their loadouts and cosmetics synced across devices
+  const accounts = createAccountStore({ file: opts.accountsFile || path.join(ROOT, '.cache', 'accounts.json'), log });
+  await accounts.ready;
+  // 公告 (docs/ANNOUNCEMENTS.md): the served notices (their live push starts once the network exists)
+  const announcements = createAnnouncementStore({ dir: opts.announcementsDir, root: ROOT, log });
   packs.refresh(true);
   // the content hashes of the art (built in the background once listening) and the manifests served with them
   const indexOptions = assetIndexOptionsFrom(opts, publicDir);
@@ -125,22 +156,80 @@ export async function startServer(opts = {}) {
   // an out-of-memory abort in a worker thread ends the whole server)
   const transport = String(process.env.SP_MATCH_HOST || '').trim().toLowerCase() === 'worker' ? 'worker' : 'process';
   const hosts = createMatchHosts({ contents, log, options: { transport, maxWorkers: Math.max(1, policy.get().maxSets), ...(opts.matchHost || {}) } });
-  const { registry, lobby, network } = createSessionStack(opts, { data, log, content, plugins: roomSets, hosts });
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, assetIndex, views, visual, contents });
+  const { registry, lobby, network } = createSessionStack({ ...opts, accounts }, { data, log, content, plugins: roomSets, hosts });
+  // 公告的实时推送 (docs/ANNOUNCEMENTS.md): only a command submitted to a running server is broadcast (started below)
+  const announcementNotices = createAnnouncementNoticeMonitor({ store: announcements, network, log });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, assetIndex, views, visual, contents, runtimeCache: opts.runtimeCache });
   // the plugin studio (DESIGN §32.9): its page and API for this machine and the local network; it watches plugins/ only
   // once it is used (hot reload), and rooms whose host is the author or alone follow a plugin's changes by themselves
   const studio = opts.studio === false ? null : createStudio({ publicDir, pluginsDir, dataDir, registry: packs, lobby, sessions: registry, log, fetch: opts.fetch });
   const trustedRuntime = await createTrustedRuntime({registry:packs,log});
   lobby.trustedRuntime = trustedRuntime;
+  // 离线素材缓存 (docs/ASSET_CACHE.md): a persisted owner limit overrides the programmatic/env fallback. A null setting
+  // means the default unlimited limiter, while keeping tests and embedders' explicit opts usable.
+  const fallbackAssetCacheLimits = opts.assetCacheLimits;
+  const initialAssetCacheLimits = serverSettings.get().assetCacheLimits ?? fallbackAssetCacheLimits ?? undefined;
+  const assetCache = createAssetCacheHandler({ publicDir, dataDir, log, limits: initialAssetCacheLimits, trustProxy: opts.trustProxy,
+    buildCatalog: opts.assetCacheBuildCatalog, requireAssetCache: () => serverSettings.get().requireAssetCache });
+  let warmingAssetSummary = null;
+  function warmAssetSummary() {
+    if (!warmingAssetSummary) warmingAssetSummary = assetCache.summary()
+      .catch((error) => { log.warn('[asset-cache] admission summary unavailable', error.message); })
+      .finally(() => { warmingAssetSummary = null; });
+    return warmingAssetSummary;
+  }
+  function applySettings(next) {
+    lobby.setAiLimit(next.maxAiPerRoom);
+    lobby.setAssetCachePolicy({ required: next.requireAssetCache, getSummary: assetCache.currentSummary });
+    assetCache.setLimits(next.assetCacheLimits ?? fallbackAssetCacheLimits);
+    // Runtime enabling fails closed until a summary is ready; ordinary optional startup stays lazy.
+    if (next.requireAssetCache && !assetCache.currentSummary()) void warmAssetSummary();
+  }
+  applySettings(serverSettings.get());
+  if (serverSettings.get().requireAssetCache) await warmAssetSummary();
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
   buildTag();
 
   const traffic = createTrafficCounter();
-  const server = http.createServer(createRequestHandler({ serveStatic, csp: process.env.SP_CSP === 'off' ? null : siteCsp(publicDir), health: { startedAt, network, registry, lobby, content, traffic, assetIndex, views, trusted:trustedRuntime?.health }, log, trustProxy: network.opts.trustProxy, studio, trustedRuntime }));
+  let requestHandler;
+  const bandwidthEmergency = createBandwidthEmergencyController({
+    ...(opts.bandwidthEmergency || {}), ...emergencyOptions,
+    getMetrics: () => assetCache.metrics(), getCongestion: () => network.congestion(),
+    canResume: () => [...lobby.rooms.values()].every((room) => !room.match || room.activeHumans().some((seat) => seat.connected)),
+    log,
+    onChange: (state) => {
+      if (state.active) {
+        assetCache.trip(state.reason);
+        requestHandler?.abortPublicRequests();
+        // `finish` only means handed to TCP, not delivered. Close ordinary HTTP sockets too,
+        // including finished keep-alive transfers; Node deliberately excludes upgraded WebSockets.
+        server.closeAllConnections?.();
+      } else assetCache.resume();
+      network.setEmergency(state);
+      lobby.setEmergency(state);
+      log.warn(`[bandwidth-emergency] ${state.active ? state.action === 'retry-delayed'
+        ? '现有对局仍未具备恢复条件，继续保护' : '保护开启，下载和新访问已切断，对局冻结'
+        : '尝试恢复访问和对局'} (${state.reason || 'recovery'})`);
+    },
+  });
+  const adminService = createAdminService({
+    enabled: !!adminSecret.secret, secret: adminSecret.secret, secretSource: adminSecret.source, problem: adminSecret.problem,
+    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts,
+    ring: logRing, log, startedAt, build: buildTag,
+  });
+  const admin = createAdminHandler({ admin: adminService, serveStatic, log });
+  requestHandler = createRequestHandler({ serveStatic, csp: process.env.SP_CSP === 'off' ? null : siteCsp(publicDir),
+    announcements, assetCache, admin, accounts, emergency: () => network.emergency,
+    health: { startedAt, network, registry, lobby, content, traffic, assetIndex, views, trusted: trustedRuntime?.health, bandwidthEmergency },
+    log, trustProxy: network.opts.trustProxy, studio, trustedRuntime });
+  const server = http.createServer(requestHandler);
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic });
+  // Prime before accepting connections; only commands submitted to a running server are broadcast.
+  announcementNotices.start();
+  serverSettings.start();
 
   // The address actually bound. The default may fall back to IPv4; the returned host and url follow that.
   let boundHost;
@@ -183,6 +272,10 @@ export async function startServer(opts = {}) {
       await trustedRuntime?.close();
     }
   } catch (e) {
+    bandwidthEmergency.close();
+    serverSettings.close();
+    assetCache.close();
+    announcementNotices.close();
     network.close(); // stop heartbeat/sweep timers of the half-built server
     assetIndex?.close();
     studio?.close();
@@ -191,6 +284,7 @@ export async function startServer(opts = {}) {
   }
   server.on('error', (e) => log.error('[http] server error', e));
   assetIndex?.start();
+  bandwidthEmergency.start();
 
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : port;
@@ -200,6 +294,10 @@ export async function startServer(opts = {}) {
   async function close() {
     if (closing) return closing;
     closing = (async () => {
+      bandwidthEmergency.close();
+      serverSettings.close();
+      assetCache.close();
+      announcementNotices.close();
       try { lobby.shutdown('shutdown'); } catch (e) { log.error('[shutdown] lobby', e); }
       try { hosts.close(); } catch (e) { log.error('[shutdown] match hosts', e); }
       network.close();
@@ -216,7 +314,8 @@ export async function startServer(opts = {}) {
     return closing;
   }
 
-  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, content, visual, contents, hosts, traffic, assetIndex, views, studio, close };
+  return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, content, visual, contents, hosts, traffic, assetIndex, views, studio,
+    announcements, serverSettings, bandwidthEmergency, admin: adminService, close };
 }
 
 // `node server/index.js` / npm start: listen, print the banner, stop on SIGINT / SIGTERM (http/boot.js).

@@ -50,21 +50,23 @@ making one, in Chinese). How to set up, test and send a change: [CONTRIBUTING.md
 ## 2. The WebSocket protocol
 
 `shared/protocol.js` is normative: `C2S` holds one validator per client message and `S2C` lists the server messages.
-Every frame is JSON text, `{ t, rid?, …fields }`.
+Business objects remain `{ t, rid?, …fields }`. At the WebSocket boundary, each connection negotiates the reversible position-array protocol independently, retaining original JSON for older peers; standard permessage-deflate compresses either format. Ordinary public updates coalesce at 200 ms (5 Hz); explicit forced syncs remain immediate. The normative layout, enums and restoration CLI are in [WIRE_PROTOCOL.md](WIRE_PROTOCOL.md).
 
 | direction | messages | handled in |
 |---|---|---|
 | client → server | `hello` (name, reconnect token) → `welcome`; `ping` → `pong` | `server/net.js` |
+| | `lobby.watch` (summary / paged directory), `lobby.quickMatch` (capacity preference) | `server/lobbyDiscovery.js` |
 | | `room.*`: create, join, ready, difficulty, AI seats, kick, start, the 干员调配 loadout, 干员持有 ownership, 自选编队 picks, spectating | `server/lobby.js` |
 | | `g.*`: match intents — buy, refresh, freeze, level up, sell, move, equip, Arts, rewards, 机变 choices, ready, emotes, watching, pause … | `server/match/match/intents.js` → `server/match/player/` |
 | | `b.progress`, `b.result`: the battle reports of the authoritative browser | `server/match/match/reports.js` |
 | | `b.rehearsalResult`: the host's choice of AI layout (only with `SP_BOT_REHEARSAL=host`) | `server/match/match/rehearsal.js` |
 | server → client | `room.state`, `room.closed` | `server/lobby.js` |
+| | `lobby.state` (lobby-only counts, at most 50 public room summaries) | `server/lobbyDiscovery.js` |
 | | `m.public` (what every player sees), `m.private` (one player's shop, hand, funds …), `m.field`, `m.toast`, `m.ticker`, `m.emote`, `m.unitStats`, `m.result` | `server/match/match/views.js`, `server/match/player/views.js` |
 | | `b.start` (a BattleSpec), `b.pool` (the shared leader HP), `b.end`; `b.snap` / `b.ev` only in the server-run mode | `server/match/match/clientCombat.js` |
 | | `b.rehearsal`, `b.rehearsalCancel`: ask the host to test AI layouts or stop that task | `server/match/match/rehearsal.js` |
 
-- A request that carries `rid` is answered with `ok` or `error` echoing it. `server/net.js` rate-limits each socket,
+- A request that carries `rid` is answered with `ok`, a requested view (`lobby.state`), or `error` echoing it. `server/net.js` rate-limits each socket,
   validates every message against `C2S` and refuses anything unknown; the handlers never trust the client.
 - Messages meant for people (`m.toast`, `m.ticker`) carry a message id and its parameters, so each client shows them in
   its own language (`shared/i18n.js` `wireMessage`).
@@ -89,7 +91,9 @@ so old imports keep working: `public/js/ui/gameLogic.js` (`public/js/ui/gameLogi
 | `server/index.js` | the process entry (`npm start`); `startServer()` wires `server/http/` |
 | `server/http/` | `csp.js` (site importmap hashes and independent simulation-Worker CSP), `config.js` (environment), `websocket.js` (sessions, `/ws`, permessage-deflate), `static.js` (the mounts, the `~<hash>` asset routes), `media.js`, `files.js` (MIME, brotli / gzip, ETag, ranges), `buildTag.js`, `routes.js` (`/healthz`), `traffic.js` (bytes sent by category and on the WebSocket, `/healthz?traffic=1`), `assetIndex.js` (the content hashes of `public/assets/` and `public/fonts/`, cached in `.cache/asset-hashes.json`), `assetViews.js` (the served `/data/assets.json` and `/data/local-assets.json`: every art URL with its hash segment; ASSETS.md), `common.js`, `boot.js` (a pending update package first, banner, shutdown) |
 | `server/net.js` | sessions and reconnect tokens, rate limits, message validation |
+| `server/bandwidthEmergency.js`, `server/match/freezeScheduler.js` | Linux egress/demand congestion detection and conditional 120-second retry; reversible HTTP/download admission protection and match-local timer freezing. See [ASSET_CACHE.md](ASSET_CACHE.md#带宽紧急保护) |
 | `server/lobby.js` | rooms, seats, AI seats, spectators; starts a `Match` |
+| `server/lobbyDiscovery.js`, `shared/lobbyDiscovery.js` | lobby subscriptions, changed-only paged room summaries, atomic fastest matching; shared page size and update interval |
 | `server/data.js` | loads `data/*.json` once (frozen) |
 | `server/plugins/` | the plugin system (PLUGINS.md, DESIGN §32): `registry.js` finds the language packs of `public/i18n/`, the pack folders of `packs/` and the plugins of `plugins/`, validates them (a cosmetic plugin's asset overlay too, its files hashed), answers `/packs/index.json`, `/plugins/index.json` and which files may be served, re-reads the folders when they change; `identity.js` computes the vanilla content hash `cs` from the served sim, shared code and data at start (`/cs/<cs16>/index.json`, `/healthz`, `welcome`, `room.state`); `visualSet.js` the visual sets of cosmetic plugins — a room's or a player's, named by `vs` — served at `/vs/<vs16>/overlay.json` (the composition and each plugin's writes: the browser composes the art itself, `public/js/assets.js`), their files at `/p/<id>/<hash8>/<path>`; `contentSet.js` builds a content set of data plugins (C1, DESIGN §32.5); `roomSets.js` turns a room's plugin list into its visual set and its content set, `contentSets.js` keeps the content sets rooms hold (by `cs`, the concurrent limit, `/cs/<cs16>/…`), `policy.js` reads the server owner's `plugins/config.json` (P1c, DESIGN §32.6) |
 | `server/plugins/` (scripts and installs) | `contentData.js` reads declared JSON; `trusted.js` checks mode, lock pins and listening addresses; `scriptPreflight.js` / `scriptProbe.js` probe setup in disposable children; `scriptTestSetup.js` preloads author tests; `trustedRuntime.js` / `trustedEntry.js` / `trustedApi.js` host native server extensions; `install.js` checks and installs local or hash-pinned HTTPS zips; `forgeImport.js` converts Forge packs without executing their scripts, and `forgeKits.js` carries their `kits/` into one sandboxed script plugin |

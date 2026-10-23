@@ -29,6 +29,9 @@ function invoke(handle, url) {
     let status;
     handle({url,method:'GET',headers:{},socket:{remoteAddress:'127.0.0.1'}},{
       setHeader(){},writeHead:s => {status=s;},end:b => resolve({status,body:String(b)}),
+      // the handler tracks the in-flight public responses (the bandwidth emergency destroys them): it listens for
+      // the response's finish/close events
+      once(){},off(){},
     });
   });
 }

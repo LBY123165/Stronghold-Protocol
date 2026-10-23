@@ -103,7 +103,8 @@ describe('#7 the 联防 leak counter (HUD)', () => {
     assert.deepEqual(rowLp(b, pub, own, { uniteLocal: { b: 2 } }), own, 'the own row keeps the top bar\'s value');
     // wiring: the game screen hands the runner's per-leaker counts to the team panel, which passes them to rowLp
     assert.match(read('public/js/screens/game.js'), /const uniteLocal = phase === PHASE\.UNITE && battleState && battleState\.uniteLeft \? battleState\.uniteLeft : null;/);
-    assert.match(read('public/js/screens/game.js'), /<\$\{TeamPanel\}[^\n]*uniteLocal=\$\{uniteLocal\}/);
+    // the props may sit on the next line (the emergency banner added one), the replica still has to reach the panel
+    assert.match(read('public/js/screens/game.js'), /<\$\{TeamPanel\}[\s\S]*?uniteLocal=\$\{uniteLocal\}/);
     assert.match(read('public/js/ui/teamPanel.js'), /rowLp\(p, pub, self \? selfLive : null, \{ uniteLocal, cap \}\)/);
   });
 

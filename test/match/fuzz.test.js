@@ -39,6 +39,15 @@ function randomIntent(rng, m, ps) {
     case 'g.emote': return { t, id: rng.pick(EMOTES) };
     case 'g.watch': return { t, fieldId: rng.pick(['n:p_0', 'n:p_1', 'n:ai_0', 'u', 'b1', 'b2', 'zz', '']) };
     case 'g.autoplay': return { t, on: rng() < 0.05 };
+    // 断线接管投票 (GitHub #338 follow-up): a real seat id most of the time, an absent one otherwise — every ballot
+    // here is protocol-valid (the refusals are test/match/takeover-vote.test.js's job), so the match's own guard
+    // (no such seat / that seat is connected / nobody but the room votes) is what the fuzz run exercises
+    case 'g.takeoverVote': return {
+      t,
+      targetPlayerId: rng() < 0.85 ? rng.pick(['p_0', 'p_1', 'p_2', 'p_3', 'p_4', 'ai_0']) : 'p_1',
+      mode: rng() < 0.5 ? 'bot' : 'handover',
+      ...(rng() < 0.6 ? { candidatePlayerId: rng.pick(['p_0', 'p_2', 'p_3', 'ai_0']) } : {}),
+    };
     case 'g.pause': return { t, on: rng() < 0.5 };
     // the plugin interaction windows (PLUGIN API v2, docs/PLUGINS.md §10b): random ids and slots — no window of a
     // vanilla match is ever open, so every one of them is a refusal, which is exactly what the fuzz run checks

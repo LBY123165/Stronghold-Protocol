@@ -61,7 +61,9 @@ describe('room.kick (lobby)', () => {
   test('protocol: room.kick {seat, playerId} — a seat index and the confirmed player', () => {
     assert.equal(validateC2S({ t: 'room.kick', seat: 1, playerId: 'p_0123456789' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick', seat: 1 }), null, 'the player is required');
-    assert.notEqual(validateC2S({ t: 'room.kick', seat: 9, playerId: 'p_0123456789' }), null);
+    // the seat index is bounded by MAX_SEATS (= 20 in this capacity branch): seat 19 is valid, 20 is not
+    assert.equal(validateC2S({ t: 'room.kick', seat: 19, playerId: 'p_0123456789' }), null);
+    assert.notEqual(validateC2S({ t: 'room.kick', seat: 20, playerId: 'p_0123456789' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick', seat: 1, playerId: '' }), null);
     assert.notEqual(validateC2S({ t: 'room.kick' }), null);
   });

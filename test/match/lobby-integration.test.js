@@ -167,9 +167,11 @@ test('co-op spectator over websockets: watches the real match like an eliminated
     assert.equal(r.code, 'SPECTATOR', msg.t);
   }
   await ok(a, { t: 'g.infoReady' });
-  const draft = await pickCoopBands([a]);
-  assert.ok(Object.values(draft.draft.picks).includes('band_bldsk'), 'seed 69: the AI already took the default');
-  await a.waitFor('m.public', (p) => p.phase === 'PREP' && p.round === 1, 10000);
+  await pickCoopBands([a]);
+  // the manual human picks first in this capacity branch (seed 69 once put the AI first, already holding the default);
+  // the spectator's refused g.band had no effect on the draft
+  const prep1 = await a.waitFor('m.public', (p) => p.phase === 'PREP' && p.round === 1, 10000);
+  assert.ok(prep1.players.every((p) => typeof p.bandId === 'string' && p.bandId), 'every seat drafted a band');
   for (const msg of [{ t: 'g.buy', slot: 0 }, { t: 'g.ready', ready: true }, { t: 'g.refresh' }]) {
     const r = await s.request(msg);
     assert.equal(r.code, 'SPECTATOR', msg.t);

@@ -20,7 +20,7 @@
 // - Server clock offset (serverNow ≈ Date.now() + offset) from pong samples (lowest RTT wins),
 //   bootstrapped from `welcome.serverNow` / `m.public.serverNow`.
 //
-// Identity persistence (`identity`, see the section at the end): the name lives in localStorage;
+// Identity persistence (`identity`, see the section at the end): the name and account bearer token live in localStorage;
 // the reconnect token lives in sessionStorage (survives reloads of this tab) plus a short list of
 // recent tokens in localStorage (resume after closing/reopening the tab). `identity.init()` asks
 // the other live tabs over a BroadcastChannel which tokens they hold, so a second or duplicated tab
@@ -31,13 +31,20 @@
 
 import { PROTOCOL_VERSION, ERR_TEXT } from '../../shared/constants.js';
 import { validateC2S } from '../../shared/protocol.js';
+import { WIRE_VERSION, encodeWire, decodeWire } from '../../shared/wireCodec.js';
 import { N_ } from '../../shared/i18n.js';
+import { assetCache } from './assetCache.js';
+
+const ASSET_ADMISSION_TYPES = new Set(['room.create', 'room.join', 'lobby.quickMatch', 'room.spectate']);
 
 export const REQUEST_TIMEOUT_MS = 8000;
 export const HELLO_TIMEOUT_MS = 8000;
 export const PING_INTERVAL_MS = 4000;
 export const DEAD_AFTER_MS = 15000;
 export const BACKOFF = Object.freeze({ base: 500, factor: 2, max: 10000, jitter: 0.2 });
+const EMERGENCY_RETRY_MS = 120000;
+const EMERGENCY_RETRY_MIN_MS = 30000;
+const EMERGENCY_RETRY_JITTER_MS = 5000;
 
 /** Client-side error codes (in addition to shared ERR codes). */
 export const CLIENT_ERR_TEXT = Object.freeze({
@@ -114,7 +121,9 @@ export class Net {
    * @param {string} [opts.url] socket URL (default: derived from location at connect time)
    * @param {any} [opts.WebSocket] WebSocket constructor (default: globalThis.WebSocket)
    * @param {() => (string|null)} [opts.getToken] reconnect-token provider for `hello`
+   * @param {() => (string|null)} [opts.getAccountToken] authenticated account token provider
    * @param {() => ({ noReplace: boolean, claimAt?: number })} [opts.getTokenClaim] local ownership for this hello
+   * @param {(type?: string) => (object|null|Promise<object|null>)} [opts.getAssetCacheReadiness] local entry scan (never used for hello/resume)
    * @param {() => number} [opts.now]
    * @param {() => number} [opts.random]
    * @param {{setTimeout: Function, clearTimeout: Function, setInterval: Function, clearInterval: Function}} [opts.timers]
@@ -123,7 +132,9 @@ export class Net {
     this.url = opts.url || null;
     this.WS = opts.WebSocket || null;
     this.getToken = typeof opts.getToken === 'function' ? opts.getToken : () => null;
+    this.getAccountToken = typeof opts.getAccountToken === 'function' ? opts.getAccountToken : () => null;
     this.getTokenClaim = typeof opts.getTokenClaim === 'function' ? opts.getTokenClaim : () => null;
+    this.getAssetCacheReadiness = typeof opts.getAssetCacheReadiness === 'function' ? opts.getAssetCacheReadiness : null;
     this.now = opts.now || (() => Date.now());
     this.random = opts.random || Math.random;
     this.timers = opts.timers || {
@@ -140,6 +151,8 @@ export class Net {
     this.helloName = null;     // name we sent in the hello that got the last welcome
     this.serverName = null;    // name as normalised by the server
     this.playerId = null;
+    this.wireVersion = 0;
+    this._wireDisabled = false; // Decoding failure downgrades this page to JSON on its next full resync.
     this.attempt = 0;          // consecutive failed connection attempts
     this.retryAt = 0;          // epoch ms of the next reconnect attempt (0 = none)
     this.ping = null;          // last RTT in ms
@@ -153,6 +166,8 @@ export class Net {
     this._listeners = new Map();
     this._manualClose = false;
     this._quietSwap = false;   // next connect() keeps the current status (see CLOSE_HELLO_TIMEOUT)
+    this._helloEmergencyBlocked = false; // only refused visitors; match members retain normal reconnect priority
+    this._emergencyRetryAt = 0;
     this._openedAt = 0;
     this._reconnectTimer = null;
     this._pingTimer = null;
@@ -213,6 +228,7 @@ export class Net {
 
   /** Open the socket (no-op when already open/connecting). Also resumes after close()/replacement. */
   connect() {
+    if (this._helloEmergencyBlocked && this._reconnectTimer && this.now() < this.retryAt) return;
     const quiet = this._quietSwap;
     this._quietSwap = false;
     if (this.ws && (this.ws.readyState === WS_OPEN || this.ws.readyState === WS_CONNECTING)) return;
@@ -330,7 +346,11 @@ export class Net {
 
   _scheduleReconnect() {
     if (this._manualClose) return;
-    const delay = backoffDelay(this.attempt, this.random);
+    // A rejected visitor cannot bypass emergency admission throttling by refocusing the tab.
+    const remaining = this._emergencyRetryAt > this.now() ? this._emergencyRetryAt - this.now() : EMERGENCY_RETRY_MS;
+    const delay = this._helloEmergencyBlocked
+      ? Math.max(EMERGENCY_RETRY_MIN_MS, Math.min(EMERGENCY_RETRY_MS, remaining)) + Math.round(this.random() * EMERGENCY_RETRY_JITTER_MS)
+      : backoffDelay(this.attempt, this.random);
     this.attempt += 1;
     this.retryAt = this.now() + delay;
     this._clearTimer('_reconnectTimer', 'clearTimeout');
@@ -347,6 +367,7 @@ export class Net {
       ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
     }
     this.ws = null;
+    this.wireVersion = 0;
     this._unansweredSince = null;
     this._clearTimer('_pingTimer', 'clearInterval');
     this._clearTimer('_helloTimer', 'clearTimeout');
@@ -367,6 +388,8 @@ export class Net {
     if (!this.name) return;
     const rid = this._nextRid();
     const msg = { t: 'hello', rid, name: this.name, version: PROTOCOL_VERSION };
+    if (!this._wireDisabled) msg.wire = WIRE_VERSION;
+    try { const accountToken = this.getAccountToken(); if (typeof accountToken === 'string' && accountToken.length <= 128) msg.accountToken = accountToken; } catch { /* no account */ }
     let token = null;
     try { token = this.getToken(); } catch { token = null; }
     if (typeof token === 'string' && token.length > 0 && token.length <= 64) {
@@ -400,8 +423,11 @@ export class Net {
     this.helloName = this._helloSentName;
     this.serverName = typeof msg.name === 'string' && msg.name ? msg.name : this._helloSentName;
     this.playerId = msg.playerId ?? null;
+    this.wireVersion = !this._wireDisabled && msg.wire === WIRE_VERSION ? WIRE_VERSION : 0;
     this.attempt = 0;
     this.lastError = null;
+    this._helloEmergencyBlocked = false;
+    this._emergencyRetryAt = 0;
     if (Number.isFinite(msg.serverNow)) this._addClockSample(msg.serverNow + (this.ping ?? 0) / 2 - this.now(), Infinity);
     this._setStatus('online');
     this._flushQueue();
@@ -412,10 +438,12 @@ export class Net {
     this._clearTimer('_helloTimer', 'clearTimeout');
     this._helloRid = null;
     this.lastError = new NetError(msg.code, msg.msg, msg.detail);
+    const alreadyBlocked = this._helloEmergencyBlocked;
+    if (msg.code === 'SERVER_EMERGENCY') this._helloEmergencyBlocked = true;
     this._setStatus('connected');
     // Queued requests can't be sent without a session.
     this._failPending('OFFLINE', true);
-    this._emit('helloError', this.lastError);
+    if (msg.code !== 'SERVER_EMERGENCY' || !alreadyBlocked) this._emit('helloError', this.lastError);
   }
 
   // ---- requests --------------------------------------------------------------------------------
@@ -435,6 +463,22 @@ export class Net {
    * @returns {Promise<any>}
    */
   request(t, fields = {}, opts = {}) {
+    const body = fields && typeof fields === 'object' ? fields : {};
+    const establishing = ['connecting', 'handshaking', 'reconnecting'].includes(this.status) && this.name && !this._manualClose;
+    if (this.getAssetCacheReadiness && ASSET_ADMISSION_TYPES.has(t) && !Object.hasOwn(body, 'assetCache')
+      && (this.status === 'online' || establishing) && !validateC2S({ ...body, t })) {
+      const send = (report) => this._request(t, report ? { ...body, assetCache: report } : body, opts);
+      let pending;
+      try { pending = this.getAssetCacheReadiness(t); }
+      catch { return send(null); }
+      // Optional mode stays usable with unsupported/failed local storage; strict mode is checked on the server.
+      if (pending && typeof pending.then === 'function') return Promise.resolve(pending).catch(() => null).then(send);
+      return send(pending);
+    }
+    return this._request(t, body, opts);
+  }
+
+  _request(t, fields = {}, opts = {}) {
     return new Promise((resolve, reject) => {
       if (t === 'hello') { reject(new NetError('BAD_MSG', 'use setName() for hello')); return; }
       const rid = this._nextRid();
@@ -486,7 +530,8 @@ export class Net {
     const ws = this.ws;
     if (!ws || ws.readyState !== WS_OPEN) return false;
     try {
-      ws.send(JSON.stringify(obj));
+      const compact = this.wireVersion === WIRE_VERSION && obj.t !== 'hello';
+      ws.send(JSON.stringify(compact ? encodeWire(obj, 'c2s') : obj));
       return true;
     } catch (err) {
       console.warn('[net] send failed', err);
@@ -537,6 +582,17 @@ export class Net {
       console.warn('[net] dropped non-JSON frame');
       return;
     }
+    if (Array.isArray(msg)) {
+      try {
+        if (this.wireVersion !== WIRE_VERSION) throw new Error('wire not negotiated');
+        msg = decodeWire(msg, 's2c');
+      } catch (error) {
+        console.warn('[net] compact decode failed; reconnecting with JSON', error.message);
+        this._wireDisabled = true;
+        this.reconnectNow();
+        return;
+      }
+    }
     if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.t !== 'string') return;
     const { t } = msg;
     const rid = msg.rid;
@@ -547,6 +603,9 @@ export class Net {
       // Do not publish or persist that stale welcome, even if the server had already accepted it.
       if (this._helloToken !== this.getToken()) { this.reconnectNow(); return; }
       this._onWelcome(msg);
+    } else if (t === 'm.emergency') {
+      this._emergencyRetryAt = msg.active
+        ? (Number.isFinite(msg.retryAt) ? msg.retryAt - this.clockOffset : this.now() + EMERGENCY_RETRY_MS) : 0;
     } else if (t === 'pong') {
       this._onPong(msg);
     } else if (isHelloError) {
@@ -674,11 +733,13 @@ export class Net {
 // its own token (never another tab's), so it can't steal a live session either.
 
 const K_NAME = 'sp.name';
+const K_ACCOUNT = 'sp.accountToken';
 const K_TOKEN = 'sp.token';      // sessionStorage: this tab's token
 const K_WELCOME = 'sp.tokenWelcome'; // sessionStorage: { hash, at } from the first welcome for this token
 const K_RECENT = 'sp.tokens';    // localStorage: this browser's recent tokens, most recent first
 const K_MATCHES = 'sp.matches'; // local metadata for explicit recovery of another closed tab's seat
 const K_ENTERED = 'sp.entered';  // sessionStorage: this tab passed the title screen
+const K_REMEMBER = 'sp.rememberAuth'; // localStorage: 记住密码 autofill { u, p }; p is base64 obfuscation, NOT encryption
 const RECENT_MAX = 4;
 const TOKEN_MAX_LEN = 64;        // protocol limit for hello.token
 const CHANNEL_NAME = 'sp.identity';
@@ -703,6 +764,16 @@ function sset(s, k, v) { try { if (s) s.setItem(k, v); } catch { /* quota / priv
 function sdel(s, k) { try { if (s) s.removeItem(k); } catch { /* ignore */ } }
 
 const isToken = (t) => typeof t === 'string' && t.length > 0 && t.length <= TOKEN_MAX_LEN;
+
+// 记住密码 keeps the password in localStorage so the title form can prefill it next time. base64 is
+// obfuscation only (it keeps the plaintext out of casual view); it is NOT encryption — anyone with
+// access to this browser's localStorage can recover it, so it should only be enabled on a private device.
+function encodeSecret(str) {
+  try { return globalThis.btoa(String.fromCharCode(...new TextEncoder().encode(String(str)))); } catch { return null; }
+}
+function decodeSecret(b64) {
+  try { return new TextDecoder().decode(Uint8Array.from(globalThis.atob(String(b64)), (c) => c.charCodeAt(0))); } catch { return null; }
+}
 
 /**
  * Short, stable hash of a token (FNV-1a, hex) so tabs never broadcast tokens in clear.
@@ -915,6 +986,27 @@ export function createIdentity(deps = {}) {
     loadName: () => (sget(local, K_NAME) || '').slice(0, 64),
     /** @param {string} name */
     saveName: (name) => sset(local, K_NAME, String(name)),
+    getAccountToken: () => sget(local, K_ACCOUNT),
+    setAccountToken: (token) => token ? sset(local, K_ACCOUNT, String(token)) : sdel(local, K_ACCOUNT),
+    /** 记住密码 autofill: the locally stored { username, password }, or null. Password is obfuscated, not encrypted. */
+    loadRemembered() {
+      try {
+        const raw = JSON.parse(sget(local, K_REMEMBER) || 'null');
+        if (!raw || typeof raw !== 'object') return null;
+        const username = typeof raw.u === 'string' ? raw.u : '';
+        const password = typeof raw.p === 'string' ? decodeSecret(raw.p) : null;
+        return username && password ? { username, password } : null;
+      } catch { return null; }
+    },
+    /** @param {string} username @param {string} password */
+    saveRemembered(username, password) {
+      if (!username || !password) return;
+      const enc = encodeSecret(password);
+      if (enc == null) return;
+      sset(local, K_REMEMBER, JSON.stringify({ u: String(username), p: enc }));
+    },
+    /** Forget the stored 记住密码 credentials (unchecking the box, or a login the user chose not to remember). */
+    clearRemembered() { sdel(local, K_REMEMBER); },
     /** Token for `hello` (null ⇒ new session). Before init() only this tab's own token is used. */
     getToken() {
       if (current) return current;
@@ -965,4 +1057,11 @@ export function createIdentity(deps = {}) {
 export const identity = createIdentity({ onYield: () => net.reconnectNow(net.helloName || net.name) });
 
 /** Browser connection singleton (created lazily-safe: nothing touches the network until connect()). */
-export const net = new Net({ getToken: () => identity.getToken(), getTokenClaim: () => identity.getTokenClaim() });
+export const net = new Net({ getToken: () => identity.getToken(), getTokenClaim: () => identity.getTokenClaim(), getAccountToken: () => identity.getAccountToken(),
+  // Optional rooms must stay instant: only the owner's strict admission policy needs a local cache scan.
+  getAssetCacheReadiness: (type) => {
+    const state = assetCache.getState();
+    return state.supported && state.requireAssetCache ? assetCache.admission({ fast: type === 'room.create' }) : null;
+  } });
+net.on('welcome', (message) => assetCache.setRequirement(message.requireAssetCache));
+net.on('lobby.state', (message) => assetCache.setRequirement(message.requireAssetCache));

@@ -212,6 +212,7 @@ import { DataSource } from '../sim/simdata.js';
 import { createRng, deriveSeed } from '../sim/rng.js';
 import { GameData } from './gamedata.js';
 import { RealScheduler } from './scheduler.js';
+import { FreezeScheduler } from './freezeScheduler.js';
 import { createPoolGroups, drawDisabledBonds } from './pool.js';
 import { PlayerState } from './PlayerState.js';
 import { EffectDispatcher, getDefaultRegistry } from './effectsMeta.js';
@@ -226,6 +227,7 @@ import { MatchIntents } from './match/intents.js';
 import { MatchPause } from './match/pause.js';
 import { MatchPhases } from './match/phases.js';
 import { MatchSetupVote } from './match/setupVote.js';
+import { MatchTakeover } from './match/takeover.js';
 import { MatchSpDraft } from './match/spDraft.js';
 import { MatchPrep } from './match/prep.js';
 import { MatchCombat } from './match/combat.js';
@@ -315,7 +317,16 @@ export class Match {
     /** Co-op always keeps manual online players first (D004/D012); the upstream setting cannot disable that rule. */
     this.aiPicksLast = !this.isSolo;
     this.ownsScheduler = !opts.scheduler;
-    this.sched = opts.scheduler || new RealScheduler({ now: opts.now || Date.now, onError: (e) => this.reportError('timer', e) });
+    // 带宽应急保护 (docs/ASSET_CACHE.md): the FreezeScheduler holds every timer while the match is frozen
+    // (setEmergencyFreeze) and resumes the remaining delays without replaying missed ticks.
+    this.sched = new FreezeScheduler(opts.scheduler || new RealScheduler({ now: opts.now || Date.now, onError: (e) => this.reportError('timer', e) }), { ownsSource: this.ownsScheduler });
+    /** Server-controlled emergency protection is separate from the user's solo combat pause. */
+    this.emergencyFrozen = false;
+    this.emergencyFrozenAt = 0;
+    this.emergencyReason = null;
+    this.emergencyFrozenMs = 0;
+    this._emergencyLeaves = new Set();
+    this._emergencyLostAuthorities = new Set();
     this.registry = opts.registry || getDefaultRegistry();
     this.dispatcher = new EffectDispatcher(this, this.registry);
     this.BattleClass = typeof opts.BattleClass === 'function' ? opts.BattleClass : Battle;
@@ -466,6 +477,12 @@ export class Match {
     this.setupVote = null;
     this._setupVoteSeq = 0;
     this._lastSetupVoteAt = -Infinity;
+    // 断线接管投票 (GitHub #338 follow-up): the open vote about a disconnected seat, the seat that waits for the
+    // room's decision, and the pending grace timers.
+    this.takeoverVote = null;
+    this.takeoverPending = null;
+    this._takeoverVoteSeq = 0;
+    this._takeoverGrace = new Map();
     this._turnTimer = null;
     this._pubDirty = false;
     this._pubTimer = null;
@@ -525,7 +542,7 @@ export class Match {
 }
 
 // the method modules, in this order (a name defined twice is an error, never a silent override)
-for (const part of [MatchPlatform, MatchInfra, MatchMessaging, MatchViews, MatchWatch, MatchIntents, MatchPause, MatchPhases, MatchSetupVote, MatchSpDraft, MatchPrep, MatchCombat, MatchClientCombat, MatchRehearsal, MatchReports, MatchUnite, MatchBoss, MatchSettle, MatchTestCommands, MatchOffers]) {
+for (const part of [MatchPlatform, MatchInfra, MatchMessaging, MatchViews, MatchWatch, MatchIntents, MatchPause, MatchPhases, MatchSetupVote, MatchTakeover, MatchSpDraft, MatchPrep, MatchCombat, MatchClientCombat, MatchRehearsal, MatchReports, MatchUnite, MatchBoss, MatchSettle, MatchTestCommands, MatchOffers]) {
   for (const key of Reflect.ownKeys(part.prototype)) {
     if (key === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(Match.prototype, key)) throw new Error(`Match.${String(key)} is defined twice`);

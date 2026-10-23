@@ -51,6 +51,7 @@
 // caller falls back (docs/ASSETS.md "Other fallbacks").
 
 import { cosmetics, createCosmeticLayers, EMPTY_MANIFEST } from './cosmetics.js';
+import { runtimeURL, runtimeCacheMode } from './runtime.js';
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' && v ? v : null);
@@ -63,6 +64,21 @@ export function baseCharId(id) {
   const s = str(id);
   if (!s) return null;
   return s.replace(/_(1|2)$/, '');
+}
+
+/**
+ * 干员皮肤 (docs/SKINS.md): the installed skin record of an operator — `data/assets.json` →
+ * `chars[charId].skins[skinId]` = `{ name, group, avatar, spine? }` — or null when this build has no such skin (an
+ * unknown id is harmless: the caller falls back to the default model).
+ * @param {any} m the assets manifest
+ * @param {string} charId the OPERATOR id (`char_498_inside`), not the chess id
+ * @param {string|null|undefined} skinId
+ */
+export function skinRecord(m, charId, skinId) {
+  const id = str(skinId);
+  if (!id) return null;
+  const rec = get(get(m, 'chars'), str(charId) || '');
+  return get(get(rec, 'skins'), id) || null;
 }
 
 /**
@@ -207,6 +223,9 @@ export function subProfIconUrl(m, sub) {
  * Spine manifest entry for a unit asset id (operator charId, token id, enemy id). `opts.back` asks for the Back
  * model (operators only; falls back to Front). Enemy aliases are resolved transparently. Returns the Spine
  * object of docs/ASSETS.md or null.
+ * `opts.skin` (干员皮肤, docs/SKINS.md) asks for an installed skin's own model: it replaces the operator's default one
+ * and the default becomes the returned entry's `fallback`, so a skin whose files fail to load (or a skin that only has
+ * an avatar) still draws the operator rather than nothing.
  * `opts.local` (the data/local-assets.json manifest): an enemy or token whose official model only the local client has
  * (`spineLocal`, e.g. 灼热源石虫 — user feedback after 0.1.0, D3 — and most 自选 summons) gets that model when the
  * manifest lists every one of its files; the returned entry's `fallback` is the web model (an enemy's alias; a token's
@@ -255,6 +274,12 @@ export function spineEntry(m, id, opts) {
 }
 
 const localSpines = new WeakMap(); // spineLocal record → { local, web, entry } (one entry object per manifest pair)
+
+/** The operator's own model for a direction: `opts.back` prefers Back, falling back to Front. Null when unusable. */
+export function defaultSpine(ch, opts) {
+  const sp = (opts && opts.back && isObj(ch.spine.back)) ? ch.spine.back : ch.spine.front;
+  return validSpine(sp) ? sp : null;
+}
 
 /**
  * A manifest `spineLocal` (`{ group, skel, atlas, textures[], pma, anims, … }`, file names in the data/local-assets.json
@@ -857,7 +882,8 @@ export function createAssets(options) {
 
   /** One fetch of the manifest → the JSON object, or throws (err.status / err.badJson as data.js). */
   async function fetchOnce() {
-    const res = await doFetch(url, { cache: 'no-cache' });
+    const versioned = runtimeURL(url);
+    const res = await doFetch(versioned, { cache: runtimeCacheMode(versioned) });
     if (!res || !res.ok) throw Object.assign(new Error(`HTTP ${res ? res.status : '???'}`), { status: res ? res.status : null });
     let json;
     try { json = await res.json(); } catch (err) { throw Object.assign(err instanceof Error ? err : new Error(String(err)), { badJson: true }); }
@@ -963,7 +989,8 @@ export function createAssets(options) {
     if (!localPromise) {
       localPromise = (async () => {
         try {
-          const res = await doFetch(localUrl, { cache: 'no-cache' });
+          const versioned = runtimeURL(localUrl);
+          const res = await doFetch(versioned, { cache: runtimeCacheMode(versioned) });
           if (!res || !res.ok) return localManifest;
           const json = await res.json();
           if (!localManifest && isObj(json) && isObj(json.groups)) { localManifest = json; notify('local'); }

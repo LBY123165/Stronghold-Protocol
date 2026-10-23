@@ -19,6 +19,8 @@ import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_S
 import { html, confirmDialog, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
+import { AnnouncementButton } from '../ui/announcements.js';
+import { AssetCacheButton } from '../ui/assetCache.js';
 import { openStats } from './stats.js';
 import { SweepReport } from './sweep.js';
 import { SettingsButton } from '../ui/settings.js';
@@ -29,6 +31,8 @@ import { store, useStore, shallowEqual, loadPref, savePref } from '../store.js';
 import { getConfig, getMode, getStage, useData } from '../data.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
 import { NoticesButton } from '../ui/notices.js';
+import { createLobbyDiscovery } from '../lobbyDiscovery.js';
+import { LobbyOnlinePill, LobbyDiscoveryPanel, LobbyRoomList } from '../ui/lobbyDiscovery.js';
 
 /** Official mode texts (activity_table act2autochess.modeDataDict), fallback when config.json is absent. */
 export const MODE_TEXT = {
@@ -87,7 +91,7 @@ const MODE_CARDS = [
   },
   {
     id: 'coop', name: N_('同盟模拟'), en: 'ALLIANCE SIMULATION', icon: 'users',
-    desc: N_('与至多 {n} 名博士组成同盟，共享干员池，联防协作抵御敌潮。'), params: { n: MAX_SEATS - 1 },
+    desc: N_('与至多 {n} 名博士组成同盟，分组共享干员池，联防协作抵御敌潮。'), params: { n: MAX_SEATS - 1 },
     points: [N_('1–{n} 名博士 · 可由 AI 队友补位'), N_('联防阶段 · 最终攻势合并生命值')], pointParams: { n: MAX_SEATS },
   },
 ];
@@ -268,20 +272,32 @@ export function LobbyScreen() {
     const d = loadPref('lobby.difficulty', 'FUNNY');
     return DIFFICULTIES.includes(d) ? d : 'FUNNY';
   });
-  const [code, setCode] = useState('');
   const [capacity, setCapacity] = useState(() => {
     const saved = loadPref('lobby.capacity', DEFAULT_SEATS);
     return ROOM_CAPACITIES.includes(saved) ? saved : DEFAULT_SEATS;
   });
+  const [code, setCode] = useState('');
   const [asTest, setAsTest] = useState(false);
   const testMode = useStore((s) => s.testMode === true);
   const [busy, setBusy] = useState(null);
+  const discoveryRef = useRef(null);
+  if (!discoveryRef.current) discoveryRef.current = createLobbyDiscovery({ net });
+  const discovery = discoveryRef.current;
+  const discoveryState = useStore((s) => s, shallowEqual, discovery.target);
+  const [matchCapacity, setMatchCapacity] = useState(() => {
+    const saved = loadPref('lobby.matchCapacity', null);
+    return ROOM_CAPACITIES.includes(saved) ? saved : null;
+  });
   const [recent] = useState(recentRooms);
   const marks = loadPref('recentTestRooms', []);
   const [sweepOpen, setSweepOpen] = useState(false);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    discovery.start();
+    return () => discovery.dispose();
+  }, [discovery]);
 
   const online = conn.status === 'online';
   const codeOk = CODE_RE.test(code);
@@ -303,6 +319,11 @@ export function LobbyScreen() {
   const create = () => run('create', () => net.request('room.create', {
     mode: roomMode, difficulty, ...(roomMode === 'coop' ? { capacity } : {}), ...(testMode && asTest ? { test: true } : {}),
   }));
+  const quickMatch = () => run('quickMatch', () => net.request('lobby.quickMatch', matchCapacity ? { capacity: matchCapacity } : {}).catch((err) => {
+    if (err?.code === ERR.ROOM_NOT_FOUND) { toast(t('暂无可加入的房间，请稍后重试或创建同盟。'), 'warn'); return; }
+    throw err;
+  }));
+  const directoryJoin = (roomCode) => run('directoryJoin', () => net.request('room.join', { code: roomCode }));
   const join = (c = code) => {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
@@ -339,9 +360,11 @@ export function LobbyScreen() {
       <div class="topbar__left">
         <${Button} variant="ghost" size="sm" icon="chevronLeft" onClick=${backToTitle} title=${t('返回标题')}>${t('返回')}<//>
         <${PingPill} ms=${conn.ping} online=${online} />
+        <${LobbyOnlinePill} count=${discoveryState.online} connected=${online} />
         <span class="topbar__sep" aria-hidden="true"></span>
         <div class="topbar__tools">
           <${NoticesButton} />
+          <${AssetCacheButton} />
           <${SettingsButton} class="lobby-settings" variant="secondary" square=${true} />
           <${GuideButton} class="lobby-guide" variant="secondary" square=${true} />
           <${PwaInstallButton} class="lobby-pwa" square=${true} />
@@ -353,6 +376,7 @@ export function LobbyScreen() {
       </div>
       <div class="topbar__right">
         <${ResumeMatchButton} />
+        <${AnnouncementButton} variant="secondary" />
         <${Button} variant="secondary" size="sm" icon="book" class="lobby-sweep" onClick=${() => setSweepOpen(true)}
           title=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')}>S.W.E.E.P.<//>
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
@@ -373,6 +397,10 @@ export function LobbyScreen() {
         <div class="mode-cards">
           ${MODE_CARDS.map((c) => html`<${ModeCard} key=${c.id} card=${c} selected=${roomMode === c.id} onSelect=${pickMode} />`)}
         </div>
+
+        <${LobbyDiscoveryPanel} state=${discoveryState} connected=${online} capacity=${matchCapacity}
+          onCapacity=${(n) => { setMatchCapacity(n); savePref('lobby.matchCapacity', n); }}
+          onOpen=${() => discovery.show()} onQuickMatch=${quickMatch} busy=${busy === 'quickMatch'} />
 
         <div class="section-label"><span class="section-label__idx num">03</span>${t('加入同盟')}<${MicroLabel}>JOIN WITH ALLIANCE KEY<//></div>
         <${Panel} class="join-panel" tone="amber">
@@ -426,5 +454,8 @@ export function LobbyScreen() {
       </section>
     </div>
     ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
+    ${discoveryState.open ? html`<${LobbyRoomList} state=${discoveryState} connected=${online}
+      onClose=${() => discovery.close()} onRefresh=${() => discovery.refresh()} onPage=${(page) => discovery.page(page)}
+      onJoin=${directoryJoin} busy=${!!busy} />` : null}
   </div>`;
 }
