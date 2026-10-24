@@ -347,6 +347,118 @@ function resetAnnouncementForm() {
   $('ann-msg').textContent = '';
 }
 
+// ---- OneBot 群招募 ------------------------------------------------------------------------------------------
+// The forward-WS OneBot client's console: config + live status in one answer (GET /onebot), saved whole
+// (POST /onebot/config), plus 重连 and a fixed test line. The token never comes back — the form only says whether one
+// is set, and an empty input means "leave it as is".
+
+/** Parse the group textarea: numbers split by newlines, commas (both widths), semicolons or spaces. */
+function parseGroups() {
+  return ($('ob-groups').value || '').split(/[\s,，;；、]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** The suggested reverse-WS URL for the OneBot implementation: this page's own host + the fixed path. */
+function suggestServerUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return proto + '//' + location.host + ($('ob-path') ? $('ob-path').textContent : '/onebot/ws');
+}
+
+/** Show/hide the mode-specific fields. */
+function renderOnebotMode(mode) {
+  const server = mode === 'server';
+  $('ob-url-row').hidden = server;
+  $('ob-server-hint').hidden = !server;
+  if (server) $('ob-server-url').textContent = suggestServerUrl();
+}
+
+function renderOnebotStatus(st) {
+  const badge = $('ob-badge');
+  if (!st) { badge.textContent = '—'; badge.className = 'badge badge--dim'; return; }
+  const server = st.mode === 'server';
+  if (st.connected) { badge.textContent = server ? '已连入' : '已连接'; badge.className = 'badge badge--on'; }
+  else if (st.connecting) { badge.textContent = '连接中'; badge.className = 'badge badge--dim'; }
+  else if (server && st.listening) { badge.textContent = '等待 OneBot 连入'; badge.className = 'badge badge--dim'; }
+  else { badge.textContent = st.enabled ? '未连接' : '未启用'; badge.className = 'badge badge--off'; }
+  const view = {
+    ...st,
+    lastErrorAt: st.lastErrorAt ? new Date(st.lastErrorAt).toLocaleString('zh-CN') : null,
+    lastSentAt: st.lastSentAt ? new Date(st.lastSentAt).toLocaleString('zh-CN') : null,
+  };
+  $('ob-status').textContent = JSON.stringify(view, null, 2);
+}
+
+/** Load config + status into the form. The panel stays usable; 503 only means this deployment has no OneBot module. */
+async function loadOnebot() {
+  const res = await api('/onebot');
+  if (res.status === 503) {
+    $('ob-msg').textContent = '这台服务器没有启用 OneBot 群招募功能。';
+    $('ob-status').textContent = '—';
+    renderOnebotStatus(null);
+    return;
+  }
+  if (res.status !== 200) { $('ob-msg').textContent = '读取 OneBot 配置失败：' + ((res.body && res.body.error) || res.status); return; }
+  const { config, status } = res.body;
+  $('ob-enabled').checked = !!config.enabled;
+  $('ob-mode').value = config.mode === 'server' ? 'server' : 'client';
+  renderOnebotMode(config.mode === 'server' ? 'server' : 'client');
+  $('ob-url').value = config.url || '';
+  $('ob-token').value = '';
+  $('ob-token-hint').textContent = config.tokenSet ? '已设置' : '未设置';
+  $('ob-groups').value = (config.groups || []).join('\n');
+  $('ob-template').value = config.template || '';
+  $('ob-link-base').value = config.linkBase || '';
+  $('ob-cooldown').value = config.cooldownSec ?? 60;
+  $('ob-msg').textContent = '';
+  renderOnebotStatus(status);
+}
+
+/** Save the form (token only when typed) and refresh the status; server errors come back as Chinese text. */
+$('btn-ob-save').addEventListener('click', async () => {
+  const msg = $('ob-msg');
+  const body = {
+    enabled: $('ob-enabled').checked,
+    mode: $('ob-mode').value,
+    url: $('ob-url').value.trim(),
+    groups: parseGroups(),
+    template: $('ob-template').value,
+    linkBase: $('ob-link-base').value.trim(),
+    cooldownSec: Number($('ob-cooldown').value) || 0,
+  };
+  const token = $('ob-token').value;
+  if (token) body.token = token;
+  const btn = $('btn-ob-save');
+  btn.disabled = true;
+  const res = await api('/onebot/config', { body });
+  btn.disabled = false;
+  if (res.status !== 200) { msg.textContent = '保存失败：' + ((res.body && res.body.error) || res.status); return; }
+  msg.textContent = '已保存并应用到运行中的服务器。';
+  await loadOnebot();
+});
+
+$('ob-mode').addEventListener('change', () => renderOnebotMode($('ob-mode').value));
+
+$('btn-ob-reconnect').addEventListener('click', async () => {
+  const res = await api('/onebot/reconnect', { body: {} });
+  $('ob-msg').textContent = res.status === 200
+    ? ($('ob-mode').value === 'server' ? '已断开现有连接，OneBot 会用新配置重新连入。' : '已按当前配置重新连接。')
+    : '重连失败：' + ((res.body && res.body.error) || res.status);
+  setTimeout(loadOnebot, 800);
+});
+
+$('btn-ob-test').addEventListener('click', async () => {
+  const res = await api('/onebot/test', { body: {} });
+  if (res.status === 200) $('ob-msg').textContent = `测试消息已发送（${res.body.sent}/${res.body.total} 个群成功）。`;
+  else $('ob-msg').textContent = '测试失败：' + ((res.body && res.body.error) || res.status) + (res.body && res.body.failed ? ` ${res.body.failed.map((f) => f.group + ': ' + f.error).join('; ')}` : '');
+  await loadOnebot();
+});
+
+$('btn-ob-clear-token').addEventListener('click', async () => {
+  if (!confirm('清除已保存的 OneBot Access Token？\n\n未设置 Token 的 OneBot 实现仍可连接（取决于其配置）。')) return;
+  const res = await api('/onebot/config', { body: { token: '' } });
+  $('ob-msg').textContent = res.status === 200 ? '已清除 Token。' : '清除失败：' + ((res.body && res.body.error) || res.status);
+  await loadOnebot();
+});
+
 // ---- operators (the console's own operator accounts, owner only) ------------------------------------------
 // Creating an account hands out console access, so these endpoints answer 403 for a non-owner identity and the
 // section is hidden. The server owns the rules; the console only asks and reports.
@@ -612,5 +724,6 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) poll
   await loadSession();
   loadAccounts();
   loadAnnouncements();
+  loadOnebot();
   startPolling();
 })();
