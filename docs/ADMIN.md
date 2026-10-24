@@ -91,8 +91,12 @@ sudo systemctl restart stronghold
 | POST | `/api/admin/operators/password` | `{ id, password }` → 重置密码，该账号的所有会话立即失效 |
 | POST | `/api/admin/operators/disabled` | `{ id, disabled }` → 停用/恢复；停用时会话立即失效，该账号无法登录 |
 | POST | `/api/admin/operators/delete` | `{ id }` → 删除账号并结束其会话；ID 被释放 |
+| GET | `/api/admin/onebot` | OneBot 群招募的配置（**Token 只回 `tokenSet`，绝不回显**）+ 实时连接状态（模式、正向地址 / 反向监听与连入数） |
+| POST | `/api/admin/onebot/config` | `{ enabled?, mode?, url?, token?, groups?, template?, linkBase?, cooldownSec? }` → 校验、落盘并立即应用到运行中的服务器。`token` 缺省 = 保持不变，空串 = 清除；`mode`: `client`（正向）/ `server`（反向）。非法值返回 400 + 中文原因。保存后所有房间的 `room.state.recruit` 标志随之刷新 |
+| POST | `/api/admin/onebot/reconnect` | `{}` → 清掉重连退避，按当前配置立刻拨号 |
+| POST | `/api/admin/onebot/test` | `{}` → 向每个目标群发一条固定测试文案；任何一群失败都返回 502，`failed[]` 带每群的错误 |
 
-错误码：`400 BAD_BODY`、`401 UNAUTHORIZED`/`BAD_SECRET`/`BAD_CREDENTIALS`、`403 OWNER_ONLY`、`404 NOT_FOUND`（未知端点或房间不存在）、`405 METHOD_NOT_ALLOWED`（已知端点用了错方法）、`413 BODY_TOO_LARGE`（> 8 KB；公告发布/修改端点放宽到 96 KB）、`429 TOO_MANY_ATTEMPTS`、`503 UNAVAILABLE`（本部署没有带宽控制，无法维护模式；或本部署没有启用账号/公告/运维账号功能）。
+错误码：`400 BAD_BODY`、`401 UNAUTHORIZED`/`BAD_SECRET`/`BAD_CREDENTIALS`、`403 OWNER_ONLY`、`404 NOT_FOUND`（未知端点或房间不存在）、`405 METHOD_NOT_ALLOWED`（已知端点用了错方法）、`413 BODY_TOO_LARGE`（> 8 KB；公告发布/修改端点放宽到 96 KB）、`429 TOO_MANY_ATTEMPTS`、`502`（OneBot 测试消息发送失败）、`503 UNAVAILABLE`（本部署没有带宽控制，无法维护模式；或本部署没有启用账号/公告/运维账号/OneBot 功能）。
 
 ## 4.1 账号管理（玩家账号）
 
@@ -135,6 +139,37 @@ sudo systemctl restart stronghold
 - 用 `update` 修改公告**不会**改掉原发布者——改内容不等于换作者。
 - 控制台的公告表格有「发布者」列；服务端日志同样记录谁发布、谁修改。
 - 历史列表里每条也带同一个小字 ID。
+
+## 4.4 OneBot 群招募
+
+房间里的「招募」按钮（同盟等待房，房内任意在线真人，含观战席）把一条招募信息推送到你指定的 QQ 群，信息里可以带一条**点击直接进房的链接**。通道是 OneBot 11 WebSocket，**两种连接方式二选一**（后台面板里切换，保存即生效）：
+
+- **正向（client，默认）**：本游戏服务器作为 WS **客户端**，去连接 OneBot 实现（NapCat / Lagrange.OneBot / go-cqhttp 等）开放的正向 WS 地址。适合 OneBot 和游戏服在同一台机器或同一内网。
+- **反向（server）**：本游戏服务器在自己端口上开放 `ws(s)://本服地址:端口/onebot/ws`，OneBot 实现作为**客户端**连入（在 OneBot 侧配「反向 WebSocket 连接」，地址用后台面板显示的那条）。适合 OneBot 所在的机器**没有公网**、连不出去也进不来，但能主动拨出——它拨你，而不是你拨它。反向通道暴露在本服端口上，因此**必须设置 Token**（`Authorization: Bearer` 头或 `?access_token=` 都认），没有 Token 或 Token 不对一律拒绝；未配置 Token 时启用会被直接拒绝。同一时刻只接受一个 OneBot 连接，新连接会替换旧连接。
+
+配置保存在 `runtime/onebot.json`（0600，与账号文件同目录），后台修改保存即生效，不需要重启：
+
+| 字段 | 说明 |
+|---|---|
+| 启用 | 关掉即断开连接（反向还会断开连入的 OneBot），房间不显示「招募」按钮 |
+| 连接方式 | `client` 正向 / `server` 反向，见上 |
+| OneBot 地址 | 仅正向：`ws://` 或 `wss://` 开头，例如 `ws://127.0.0.1:3001` |
+| Access Token | 正向：OneBot 实现的 access_token；反向：连入握手必须携带的口令。走 `Authorization: Bearer` 头。**后台只显示是否已设置，永不回显**，留空保存 = 不变 |
+| 目标群号 | 每行一个，最多 10 个 5–20 位数字 |
+| 模板 | 最多 600 字；占位符 `{room}` 房间密钥、`{host}` 房主、`{players}` 当前真人数、`{capacity}` 房间人数、`{difficulty}` 难度、`{mode}` 模式、`{link}` 直接加入链接；未知的占位符原样保留 |
+| 招募链接基址 | `{link}` 用它生成 `基址/?room=房间密钥`，QQ 里点击即打开游戏页面并直接进房。填玩家能访问的地址（有 HTTPS 就填 `https://…`）；留空则 `{link}` 渲染为空 |
+| 冷却 | 同一房间两次招募的最小间隔（0–3600 秒，默认 60） |
+
+边界：
+
+- **独立模拟、进行中的对局与紧急保护期间不能招募**；冷却期内服务端直接回 `RATE`，不会重复发送。
+- 群号必须是 QQ 群里真实成员可收消息的目标——本服只负责把消息发给 OneBot 实现；OneBot 账号不在群里、被风控等失败会按群返回在测试与日志里。
+- 发送用文本消息段而非 CQ 码字符串，玩家昵称里出现 `[CQ:...]` 也只会是普通文字。
+- 未配置（或未启用）时 `room.state` 不带 `recruit`，玩家端不显示按钮；手动调 `room.recruit` 会得到 `ONEBOT_UNAVAILABLE`。
+- 保存配置后已打开的房间会收到一次新的 `room.state`，按钮随之出现/消失；正在对局的房间等回到等待房后生效。
+- HTTP 上报不支持——只有这两种 WebSocket 方式。
+
+**反向模式与反向代理**：Nginx 后面挂反向 WS 时，给 `/onebot/ws` 加一段和 `/ws` 相同的 Upgrade 配置（`deploy/nginx-stronghold.conf` 有现成模板）；OneBot 直连本服端口则无需任何代理配置。
 
 ## 5. 维护模式到底做了什么
 
