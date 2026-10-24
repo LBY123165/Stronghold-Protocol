@@ -69,6 +69,7 @@ import { createAdminService, createLogRing, readAdminSecret, withLogRing } from 
 import { createAdminHandler } from './http/admin.js';
 import { createAccountStore } from './accounts.js';
 import { createAdminAccountStore } from './adminAccounts.js';
+import { createOneBotConfig, createOneBotClient } from './onebot.js';
 
 // The public API of this module (tests and tools import it from here); the code lives in ./http/.
 export {
@@ -79,9 +80,10 @@ export {
 /**
  * Build and start the HTTP + WebSocket server.
  * @param {{
- *   port?: number, host?: string, quiet?: boolean, log?: object,
- *   publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, pluginsDir?: string,
- *   announcementsDir?: string, serverSettingsDir?: string, accountsFile?: string, adminAccountsFile?: string,
+   *   port?: number, host?: string, quiet?: boolean, log?: object,
+   *   publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, pluginsDir?: string,
+   *   announcementsDir?: string, serverSettingsDir?: string, accountsFile?: string, adminAccountsFile?: string,
+   *   onebotConfigFile?: string,
  *   MatchClass?: Function, seedFn?: () => number,
  *   lobbyGraceMs?: number, reconnectWindowMs?: number, heartbeatMs?: number, helloTimeoutMs?: number,
  *   ratePerSec?: number, rateBurst?: number, maxConnections?: number, maxRooms?: number, compactWire?: boolean, runtimeCache?: boolean,
@@ -106,6 +108,8 @@ export {
  *                     views: ReturnType<typeof createManifestViews> | null, studio: ReturnType<typeof createStudio> | null,
  *                     announcements: ReturnType<typeof createAnnouncementStore>,
  *                     serverSettings: ReturnType<typeof createServerSettings>,
+ *                     onebot: ReturnType<typeof import('./onebot.js').createOneBotClient>,
+ *                     onebotConfig: ReturnType<typeof import('./onebot.js').createOneBotConfig>,
  *                     close: () => Promise<void> }>}
  */
 export async function startServer(opts = {}) {
@@ -151,6 +155,12 @@ export async function startServer(opts = {}) {
     log,
   });
   await adminAccounts.ready;
+  // OneBot 群招募 (docs/ADMIN.md §4.4): the forward-WS client to the server owner's OneBot implementation plus its
+  // persisted configuration (runtime/onebot.json, edited in the 运维后台). Rooms get the 招募 button only while the
+  // config names at least one target group.
+  const onebotConfig = createOneBotConfig({ file: opts.onebotConfigFile || path.join(ROOT, 'runtime', 'onebot.json'), log });
+  await onebotConfig.ready;
+  const onebot = createOneBotClient({ config: onebotConfig, log });
   // 公告 (docs/ANNOUNCEMENTS.md): the served notices (their live push starts once the network exists)
   const announcements = createAnnouncementStore({ dir: opts.announcementsDir, root: ROOT, log });
   packs.refresh(true);
@@ -169,7 +179,7 @@ export async function startServer(opts = {}) {
   // an out-of-memory abort in a worker thread ends the whole server)
   const transport = String(process.env.SP_MATCH_HOST || '').trim().toLowerCase() === 'worker' ? 'worker' : 'process';
   const hosts = createMatchHosts({ contents, log, options: { transport, maxWorkers: Math.max(1, policy.get().maxSets), ...(opts.matchHost || {}) } });
-  const { registry, lobby, network } = createSessionStack({ ...opts, accounts }, { data, log, content, plugins: roomSets, hosts });
+  const { registry, lobby, network } = createSessionStack({ ...opts, accounts }, { data, log, content, plugins: roomSets, hosts, onebot });
   // 公告的实时推送 (docs/ANNOUNCEMENTS.md): only a command submitted to a running server is broadcast (started below)
   const announcementNotices = createAnnouncementNoticeMonitor({ store: announcements, network, log });
   const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, assetIndex, views, visual, contents, runtimeCache: opts.runtimeCache });
@@ -229,7 +239,7 @@ export async function startServer(opts = {}) {
   });
   const adminService = createAdminService({
     enabled: !!adminSecret.secret, secret: adminSecret.secret, secretSource: adminSecret.source, problem: adminSecret.problem,
-    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts, adminAccounts,
+    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts, adminAccounts, onebot,
     ring: logRing, log, startedAt, build: buildTag,
   });
   const admin = createAdminHandler({ admin: adminService, serveStatic, log });
@@ -239,10 +249,11 @@ export async function startServer(opts = {}) {
     log, trustProxy: network.opts.trustProxy, studio, trustedRuntime });
   const server = http.createServer(requestHandler);
   server.on('clientError', answerClientError);
-  const wss = attachWebSocket(server, { network, log, traffic });
+  const wss = attachWebSocket(server, { network, log, traffic, extraUpgrade: onebot.upgradeHook });
   // Prime before accepting connections; only commands submitted to a running server are broadcast.
   announcementNotices.start();
   serverSettings.start();
+  onebot.start();
 
   // The address actually bound. The default may fall back to IPv4; the returned host and url follow that.
   let boundHost;
@@ -289,6 +300,7 @@ export async function startServer(opts = {}) {
     serverSettings.close();
     assetCache.close();
     announcementNotices.close();
+    onebot.close();
     network.close(); // stop heartbeat/sweep timers of the half-built server
     assetIndex?.close();
     studio?.close();
@@ -311,6 +323,7 @@ export async function startServer(opts = {}) {
       serverSettings.close();
       assetCache.close();
       announcementNotices.close();
+      onebot.close();
       try { lobby.shutdown('shutdown'); } catch (e) { log.error('[shutdown] lobby', e); }
       try { hosts.close(); } catch (e) { log.error('[shutdown] match hosts', e); }
       network.close();
@@ -328,7 +341,7 @@ export async function startServer(opts = {}) {
   }
 
   return { port: actualPort, host: boundHost, url, server, wss, lobby, network, registry, packs, content, visual, contents, hosts, traffic, assetIndex, views, studio,
-    announcements, serverSettings, bandwidthEmergency, admin: adminService, close };
+    announcements, serverSettings, bandwidthEmergency, admin: adminService, onebot, onebotConfig, close };
 }
 
 // `node server/index.js` / npm start: listen, print the banner, stop on SIGINT / SIGTERM (http/boot.js).

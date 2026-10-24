@@ -24,6 +24,11 @@
 //   POST /api/admin/operators/disabled   { id, disabled } (owner only)
 //   POST /api/admin/operators/delete     { id } (owner only)
 //
+//   GET  /api/admin/onebot               → the OneBot 群招募 config (token masked) + live connection status
+//   POST /api/admin/onebot/config        { enabled?, url?, token?, groups?, template?, cooldownSec? } → save (token absent = keep, '' = clear)
+//   POST /api/admin/onebot/reconnect     {} → drop the backoff and dial now
+//   POST /api/admin/onebot/test          {} → send a fixed test line to every configured group
+//
 // With no ADMIN_SECRET the whole prefix answers 404: a deployment that forgot the secret has no console at all (there is
 // deliberately no default password). Unauthenticated API calls answer 401; the console shell itself is public, it only
 // ever draws a登录 form until the API answers.
@@ -80,6 +85,8 @@ const ANNOUNCEMENT_WRITE_ENDPOINTS = new Set([
 ]);
 /** The operator-account endpoints (owner only; the list is read by GET /api/admin/operators). */
 const OPERATOR_WRITE_ENDPOINTS = new Set(['/operators/create', '/operators/password', '/operators/disabled', '/operators/delete']);
+/** The OneBot 群招募 endpoints (the config + status are read by GET /api/admin/onebot). */
+const ONEBOT_WRITE_ENDPOINTS = new Set(['/onebot/config', '/onebot/reconnect', '/onebot/test']);
 
 /**
  * @param {{ admin: any, serveStatic: (req: any, res: any, rawPath: string, query: string) => Promise<void>,
@@ -271,6 +278,35 @@ export function createAdminHandler({ admin, serveStatic, log = console }) {
       }
       const result = await admin.notifyAnnouncement(body.id);
       json(req, res, result.ok ? 200 : 400, result);
+      return true;
+    }
+
+    // ---- the OneBot 群招募 console: its own leaves, so a bad config edit never shares the room endpoints ----
+    if (leaf === '/onebot' || ONEBOT_WRITE_ENDPOINTS.has(leaf)) {
+      if (!admin.onebotAvailable?.()) { json(req, res, 503, { ok: false, error: 'UNAVAILABLE' }); return true; }
+
+      if (leaf === '/onebot') {
+        if (method !== 'GET') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+        json(req, res, 200, admin.onebotInfo());
+        return true;
+      }
+
+      if (method !== 'POST') { json(req, res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' }); return true; }
+      const body = await readJsonBody(req);
+      if (body === undefined) { json(req, res, 413, { ok: false, error: 'BODY_TOO_LARGE' }); res.once('finish', () => req.destroy()); return true; }
+      if (!body) { json(req, res, 400, { ok: false, error: 'BAD_BODY' }); return true; }
+
+      if (leaf === '/onebot/config') {
+        const result = await admin.updateOnebotConfig(body, session.id);
+        json(req, res, result.ok ? 200 : 400, result);
+        return true;
+      }
+      if (leaf === '/onebot/reconnect') {
+        json(req, res, 200, admin.onebotReconnect());
+        return true;
+      }
+      const result = await admin.onebotTestSend();
+      json(req, res, result.ok ? 200 : 502, result);
       return true;
     }
 

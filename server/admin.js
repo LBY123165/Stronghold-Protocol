@@ -18,7 +18,8 @@
 //   * Announcements are the one writable document store: publish / update / pin / unpin / notify go through the SAME
 //     AnnouncementStore the CLI (tools/announcements.mjs) uses, so the index stays hash-verified. Delivery reuses
 //     enqueueAnnouncementNotice (the on-disk spool the running server polls) rather than a second send path, which is
-//     why a notice reaches players within ~1s without any restart.
+//     why a notice reaches players within ~1s without any restart. (The OneBot 群招募 config is the second one —
+//     runtime/onebot.json via the shared store —, kept here because it changes at runtime from the console too.)
 //
 // i18n-ignore-file: operator-facing administration API and logs, never player-facing UI text
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -146,7 +147,7 @@ export function withLogRing(log, ring) {
  * @param {{
  *   enabled: boolean, problem?: string, secretSource?: 'env'|'file'|null, secret: string|null,
  *   lobby: any, network: any, registry: any, bandwidthEmergency?: any, assetCache?: any,
- *   serverSettings?: any, announcements?: any, accounts?: any, adminAccounts?: any, ring: ReturnType<typeof createLogRing>,
+ *   serverSettings?: any, announcements?: any, accounts?: any, adminAccounts?: any, onebot?: any, ring: ReturnType<typeof createLogRing>,
  *   log?: { info?: Function, warn?: Function, error?: Function, debug?: Function },
  *   startedAt?: number, now?: () => number, build?: () => string,
  * }} deps
@@ -155,7 +156,7 @@ export function createAdminService(deps) {
   const {
     enabled, problem = '', secretSource = null, secret = null,
     lobby, network, registry, bandwidthEmergency = null, assetCache = null,
-    serverSettings = null, announcements = null, accounts = null, adminAccounts = null,
+    serverSettings = null, announcements = null, accounts = null, adminAccounts = null, onebot = null,
     ring, log = console, startedAt = Date.now(), now = Date.now, build = () => '',
   } = deps;
   /** @type {Map<string, { kind: 'owner'|'account', id: string, name: string, at: number }>} */
@@ -585,6 +586,67 @@ export function createAdminService(deps) {
     return { ok: true, msgid: command.msgid };
   }
 
+  // ---- OneBot 群招募 (docs/ADMIN.md §4.4) ----------------------------------------------------------------
+  //
+  // The forward-WS OneBot client (server/onebot.js) is optional (tests, deployments without the feature). The console
+  // reads config + live status in one answer and never sees the access token: only `tokenSet`. A save persists through
+  // the shared store (the same file the boot reads), re-evaluates the connection at once and refreshes the rooms'
+  // room.state.recruit flag, so a running server picks the change up without a restart.
+
+  const onebotAvailable = () => !!onebot && typeof onebot.broadcast === 'function' && typeof onebot.updateConfig === 'function';
+
+  /** The masked config + live status, or UNAVAILABLE without the feature. */
+  function onebotInfo() {
+    if (!onebotAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const cfg = onebot.config?.get?.() || {};
+    return { ok: true,
+      config: {
+        enabled: cfg.enabled === true, mode: cfg.mode === 'server' ? 'server' : 'client',
+        url: cfg.url || '', tokenSet: !!cfg.token,
+        groups: Array.isArray(cfg.groups) ? [...cfg.groups] : [],
+        template: cfg.template || '', cooldownSec: Number.isInteger(cfg.cooldownSec) ? cfg.cooldownSec : 60,
+        linkBase: cfg.linkBase || '',
+      },
+      status: safe(() => onebot.status() || null), at: now() };
+  }
+
+  /**
+   * Validate + persist a config patch, re-evaluate the connection and refresh the rooms' recruit flag. `token` absent =
+   * keep the stored one; `token: ''` = clear it.
+   * @param {Record<string, unknown>} patch @param {string} actorId
+   */
+  async function updateOnebotConfig(patch, actorId) {
+    if (!onebotAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const clean = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : null;
+    if (!clean) return { ok: false, error: 'BAD_BODY' };
+    /** @type {Record<string, unknown>} */
+    const fields = {};
+    for (const key of ['enabled', 'mode', 'url', 'groups', 'template', 'cooldownSec', 'linkBase']) if (Object.hasOwn(clean, key)) fields[key] = clean[key];
+    if (Object.hasOwn(clean, 'token')) fields.token = String(clean.token ?? '');
+    let next;
+    try { next = await onebot.updateConfig(fields); }
+    catch (e) { return { ok: false, error: String(e?.message || e) }; }
+    try { lobby?.refreshRecruitFlags?.(); } catch { /* a room refresh must not fail the save */ }
+    log.info?.(`[admin] ${actorId} 保存了 OneBot 配置（${next.mode === 'server' ? '反向' : '正向'}，enabled=${next.enabled}，群 ${next.groups.length} 个，冷却 ${next.cooldownSec}s）`);
+    return { ok: true, config: { enabled: next.enabled, mode: next.mode, url: next.url, tokenSet: !!next.token, groups: [...next.groups], template: next.template, cooldownSec: next.cooldownSec, linkBase: next.linkBase } };
+  }
+
+  /** Drop the reconnect backoff and dial now. */
+  function onebotReconnect() {
+    if (!onebotAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    safe(() => onebot.reconnectNow());
+    log.info?.('[admin] 手动重连 OneBot');
+    return { ok: true };
+  }
+
+  /** A fixed test line to every configured group: proof that endpoint, token and membership all work. */
+  async function onebotTestSend() {
+    if (!onebotAvailable()) return { ok: false, error: 'UNAVAILABLE' };
+    const res = await onebot.broadcast('【卫戍协议：盟约】这是一条 OneBot 测试消息。如果你在群里看到它，说明招募通道正常。');
+    log.info?.(`[admin] OneBot 测试消息：${res.sent}/${res.total}${res.failed?.length ? `（失败：${res.failed.map((f) => `${f.group}: ${f.error}`).join('; ')}）` : ''}`);
+    return { ok: res.sent > 0, ...res };
+  }
+
   return {
     enabled, problem, secretSource,
     identity, authenticate, login, loginAccount, loggedOut,
@@ -594,6 +656,7 @@ export function createAdminService(deps) {
     listOperators, createOperator, setOperatorPassword, setOperatorDisabled, deleteOperator,
     announcementsAvailable, listAnnouncements, readAnnouncement,
     publishAnnouncement, updateAnnouncement, pinAnnouncement, unpinAnnouncement, notifyAnnouncement,
+    onebotAvailable, onebotInfo, updateOnebotConfig, onebotReconnect, onebotTestSend,
     /** @param {number} since @param {number} limit */
     logs: (since, limit) => ({ ...ring.list(since, limit), at: now() }),
     /** Diagnostics for the boot line; never includes the secret. */
