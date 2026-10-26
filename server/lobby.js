@@ -402,7 +402,6 @@ export class Room {
      * humans first inside each draft group (D004/D012); disconnected/autoplay humans share the automatic category.
      */
     this.aiPicksLast = mode !== 'solo';
-    this.aiPicksLast = false;
     // [ASSUMED] Remake cooperation option, approved 2026-10-24; host opt-in before the match.
     this.aiTakeoverEnabled = false;
     /**

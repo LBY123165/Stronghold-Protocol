@@ -417,7 +417,9 @@ function mainCoreBond(m, p) {
  * it at +6..+30 per member.
  */
 export function bondPlan(m, ps, owned = ownedBonds(m, ps)) {
-  const livingBands = m.alivePlayers().filter((p) => p !== ps).flatMap((p) => m.gd.bandBondIds(p.bandId)).sort().join();
+  // 我们的分支：只有同池的队友才共享盟约条（poolMates）；上游用全部存活玩家（m.alivePlayers）。
+  const teammates = poolMates(m, ps);
+  const livingBands = teammates.flatMap((p) => m.gd.bandBondIds(p.bandId)).sort().join();
   const planMain = (advisorPlan(m, ps)?.bonds || []).slice().sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))
     .map((b) => b.id).find((id) => m.gd.bond(id)?.isCore && !m.gd.modeInactiveBonds.has(id)) ?? null;
   const key = `${m.round}|${ps.shop.level}|${[...owned.counts.entries()].map(([k, v]) => k + v).join()}|${livingBands}|${planMain}`;

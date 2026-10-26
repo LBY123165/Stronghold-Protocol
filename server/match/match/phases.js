@@ -87,6 +87,21 @@ export class MatchPhases {
     return true;
   }
 
+  /**
+   * 「AI 队友最后选择」 (opts.aiPicksLast, GitHub #338): the manual seats draft before the automatic ones.
+   * This branch keeps that rule as fixed on (room.setAiPicksLast refuses to turn it off — see
+   * docs/development/DECISIONS.md D004), so the partition always applies; the finer notion of "manual"
+   * (a handed-over seat counts as manual while its controller shows it) comes from manualDraftPicker.
+   * @param {string[]} order playerIds in drawn order
+   * @returns {string[]}
+   */
+  humansFirst(order) {
+    const manual = [];
+    const automatic = [];
+    for (const pid of order) (this.manualDraftPicker(this.players.get(pid)) ? manual : automatic).push(pid);
+    return [...manual, ...automatic];
+  }
+
   refreshDraftPriority(playerId = null) {
     if (this.emergencyFrozen) return;
     const d = this.phase === PHASE.BAND_DRAFT ? this.draft : this.phase === PHASE.SP_DRAFT ? this.sp : null;

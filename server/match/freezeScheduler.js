@@ -16,6 +16,18 @@ export class FreezeScheduler {
   now() { return this.source.now(); }
   gameNow() { return this.frozen ? this.frozenAt : this.now(); }
 
+  // The owner of the underlying scheduler still drives it (tools/matchrun.mjs and the golden runner advance a
+  // virtual scheduler step by step). Forward the driving API so a wrapped scheduler stays usable.
+  runNext() { return typeof this.source.runNext === 'function' ? this.source.runNext() : false; }
+  runUntil(predicate, maxSteps) {
+    return typeof this.source.runUntil === 'function' ? this.source.runUntil(predicate, maxSteps) : false;
+  }
+  runAll(maxSteps) {
+    return typeof this.source.runAll === 'function' ? this.source.runAll(maxSteps) : false;
+  }
+  advance(ms) { return typeof this.source.advance === 'function' ? this.source.advance(ms) : 0; }
+  pending() { return typeof this.source.pending === 'function' ? this.source.pending() : 0; }
+
   _create(fn, ms, every = 0) {
     if (this.disposed || typeof fn !== 'function') return null;
     const value = Number(ms);
