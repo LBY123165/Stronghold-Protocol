@@ -627,6 +627,51 @@ export class Network {
     return n;
   }
 
+  /** A tiny non-droppable notice goes before match resyncs; never disconnect existing players. */
+  setEmergency(state) {
+    const previous = this.emergency;
+    const active = !!state.active;
+    this.emergency = { active, reason: active ? state.reason || 'bandwidth' : null,
+      since: active ? state.startedAt || state.since || this.now() : 0,
+      retryAt: active ? state.retryAt || 0 : 0 };
+    if (previous.active && !active) {
+      // The reconnect window must not expire merely because the server froze the match.
+      const now = this.now();
+      for (const session of this.registry.all()) {
+        if (!session.connected && session.disconnectedAt != null && this.handler.allowEmergencyResume?.(session)) {
+          session.disconnectedAt += Math.max(0, now - Math.max(previous.since, session.disconnectedAt));
+        }
+      }
+    }
+    const frame = prepareMessage({ t: 'm.emergency', ...this.emergency });
+    for (const [ws, conn] of this.conns) {
+      if (active && conn.session && this.handler.allowEmergencyResume?.(conn.session)) emergencySockets.add(ws);
+      else emergencySockets.delete(ws);
+      if (!conn.closing) sendPrepared(ws, frame);
+    }
+  }
+
+  /** Only gameplay connections corroborate a slow downloader; a slow visitor cannot freeze other matches. */
+  congestion() {
+    let congestedConnections = 0; let maxBufferedBytes = 0; let delayedHeartbeats = 0;
+    let activeConnections = 0;
+    const activeNetworks = new Set(); const congestedNetworks = new Set(); const delayedNetworks = new Set();
+    const now = this.now();
+    for (const [ws, conn] of this.conns) {
+      if (conn.closing || !conn.session || !this.handler.roomOf?.(conn.session)?.match) continue;
+      activeConnections++;
+      const key = conn.key || conn.session.playerId;
+      activeNetworks.add(key);
+      const bytes = Number(ws.bufferedAmount) || 0;
+      maxBufferedBytes = Math.max(maxBufferedBytes, bytes);
+      if (bytes >= 64 * 1024) { congestedConnections++; congestedNetworks.add(key); }
+      if (conn.pendingPingAt != null && now - conn.pendingPingAt > 3000) { delayedHeartbeats++; delayedNetworks.add(key); }
+    }
+    return { activeConnections, activeNetworks: activeNetworks.size, congestedConnections,
+      congestedNetworks: congestedNetworks.size, delayedHeartbeats, delayedNetworks: delayedNetworks.size,
+      impairedNetworks: new Set([...congestedNetworks, ...delayedNetworks]).size, maxBufferedBytes };
+  }
+
   /**
    * Upgrade-time admission check (server/http/websocket.js): null to accept, otherwise the reason to refuse.
    * @param {import('node:http').IncomingMessage} req
@@ -895,9 +940,20 @@ export class Network {
   /** Ping every socket; terminate the ones that did not answer since the previous heartbeat. */
   heartbeat() {
     // A closed server has no connection left to keep alive, and a shutting-down one must not be walked: nothing to do.
-    // The pass yields between chunks, so a large connection set cannot hold the event loop for the whole sweep.
-    // A pass still yielding when the next tick fires is skipped rather than started a second time on top of itself.
     if (this.closed || this._heartbeatPending) return;
+    const now = this.now();
+    // Few connections: one synchronous sweep, so a caller sees the effect immediately (the old behaviour).
+    // Many: chunk the pass with a yield between chunks, so a large connection set cannot hold the event loop for
+    // the whole sweep. A pass still yielding when the next tick fires is skipped rather than started twice.
+    const conns = [...this.conns.entries()];
+    if (conns.length <= 128) {
+      for (const [key, conn] of conns) {
+        if (this.closed) return;
+        if (this.conns.get(key) !== conn) continue;
+        this._heartbeatConn(conn, now);
+      }
+      return;
+    }
     this._heartbeatPending = true;
     this._heartbeatPass()
       .catch((e) => this.log.debug?.('[net] heartbeat error', e?.message))
@@ -922,7 +978,6 @@ export class Network {
       if (++seen % 128 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
   }
-
   /** The per-connection step of a heartbeat (unchanged behaviour: hello timeout, dead-socket terminate, ping). */
   _heartbeatConn(conn, now) {
     try {
@@ -936,8 +991,14 @@ export class Network {
         conn.close(CLOSE.HELLO_TIMEOUT, 'hello timeout');
         return;
       }
-      if (!conn.alive) { conn.ws.terminate(); return; }
+      // 带宽紧急保护期间：不因未应答而断开（保护会冻结对局），并保留最早未应答的 ping 作为恢复证据。
+      if (!conn.alive && !(this.emergency.active && conn.session && this.handler.allowEmergencyResume?.(conn.session))) {
+        conn.ws.terminate(); return;
+      }
       conn.alive = false;
+      // Keep the oldest unanswered heartbeat: repeated pings during protection must not
+      // give a persistently unreachable player a fresh apparently healthy recovery window.
+      conn.pendingPingAt ??= now;
       conn.ws.ping();
     } catch (e) {
       this.log.debug?.('[net] heartbeat error', e?.message);
