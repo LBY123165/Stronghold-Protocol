@@ -6,6 +6,7 @@ import { Match } from '../../server/match/Match.js';
 import { StubMatch } from '../../server/match/StubMatch.js';
 import { DATA, makeMatch, checkInvariants, give, giveItem, chessOfTier } from './harness.js';
 import { bossPoolHp } from '../../server/match/finalAssault.js';
+import { DELAYS } from '../../server/match/match/common.js';
 
 const STATUSES = ['acting', 'ready', 'deciding', 'combat', 'done', 'helping', 'left', 'dead'];
 
@@ -27,13 +28,22 @@ test('public throttling starts at broadcast time even when building the previous
     broadcast: (view) => sent.push(view.serverNow),
     _maybeSendPublic: Match.prototype._maybeSendPublic,
   };
+  // The fork throttles the public frame to 125 ms (a 20-seat room carries a heavier public state), so the opening
+  // frame waits for the first interval instead of going out at once.
+  assert.equal(DELAYS.PUBLIC_THROTTLE, 125, 'the fork throttles the public frame to 125 ms');
   match._maybeSendPublic(false);
-  now = 200;
-  match._maybeSendPublic(false);
-  assert.deepEqual(sent, [116], 'the second frame waits for the full interval after the first broadcast');
+  assert.deepEqual(sent, [], 'the opening frame waits for the first interval');
   now = timers[0].at;
   timers[0].fn();
-  assert.deepEqual(sent, [116, 216]);
+  assert.deepEqual(sent, [141], 'the first frame goes out on the interval');
+  // The interval runs from the broadcast, not from the start of the snapshot build: the snapshot took 16 ms to build
+  // and the broadcast stamps the clock when it goes out, so the next frame is due 125 ms after that stamp.
+  now = 141 + 100;
+  match._maybeSendPublic(false);
+  assert.deepEqual(sent, [141], 'the second frame waits for the full interval after the first broadcast');
+  now = timers[timers.length - 1].at;
+  timers[timers.length - 1].fn();
+  assert.deepEqual(sent, [141, 266]);
 });
 
 test('constructor validation mirrors the stub; start() sends the first m.public and one m.private per human', () => {
@@ -118,9 +128,15 @@ test('disconnect: the seat keeps playing; draft turns / prep auto-resolve at dea
   h.m.onDisconnect('p_1');
   assert.equal(m.publicView().players.find((p) => p.playerId === 'p_1').connected, false);
   m.handle('p_0', { t: 'g.infoReady' });
-  // p_1 never confirms: the 25 s deadline moves on; p_1 never picks: 12 s turn → 华法琳
+  // p_1 never confirms: the 25 s deadline moves on; p_1 never picks: its turn runs out and it is assigned a
+  // strategy automatically. The fork drafts manual seats first inside a fixed group (docs/PLAYER_CAPACITY.md:
+  // 「组内手动真人优先」), so the connected seat p_0 picks before the disconnected p_1 times out; p_1 then gets a
+  // strategy no teammate holds (the default 「华法琳」 unless a teammate took it).
   h.drive(() => m.phase === PHASE.PREP && m.round === 1);
-  assert.equal(h.ps('p_1').bandId, 'band_bldsk');
+  const p0Band = h.ps('p_0').bandId, p1Band = h.ps('p_1').bandId;
+  assert.ok(p1Band, 'the disconnected seat still holds a strategy');
+  assert.notEqual(p1Band, p0Band, 'the automatic assignment never duplicates a teammate\'s strategy');
+  assert.equal(p1Band, 'band_amiya', 'the default 「华法琳」 went to the seat that drafted first, so p_1 takes the next free one');
   const sentBefore = h.sent.length;
   // p_0 readies; p_1 is auto-readied at the prep deadline
   m.handle('p_0', { t: 'g.ready', ready: true });
