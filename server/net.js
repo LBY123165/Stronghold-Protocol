@@ -843,12 +843,18 @@ export class Network {
     // baseline it already has, a client that never names one (or names an unknown version) keeps getting plain frames.
     negotiateStateDelta(conn.ws, msg.delta);
 
+    // 带宽紧急保护（我们的分支）：客户端需要知道当前状态，才能暂停下载并提示玩家。
+    if (this.emergency.active && this.handler.allowEmergencyResume?.(session)) emergencySockets.add(conn.ws);
+
     let extra = null;
     try { extra = this.handler.welcomeInfo?.() ?? null; } catch (e) { this.log.error('[net] welcomeInfo crashed', e); }
-    const welcome = { ...(extra && typeof extra === 'object' ? extra : null), t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed };
+    const welcome = { ...(extra && typeof extra === 'object' ? extra : null), ...(account ? { accountSkins: account.skins || {} } : null), t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed, emergency: this.emergency };
     if (session.aiTakeoverFrom) { welcome.takeoverFrom = session.aiTakeoverFrom; session.aiTakeoverFrom = null; }
     if (validRid(rid)) welcome.rid = rid;
     // Repeated hello may renegotiate too. The acknowledgement is always readable JSON and precedes all pushes.
+    // 紧凑线路编码（shared/wireCodec.js）：客户端在 hello 里报上它能解的版本，服务端确认后才套用。
+    const wire = this.opts.compactWire && msg.wire === WIRE_VERSION ? WIRE_VERSION : 0;
+    if (wire) welcome.wire = wire;
     setWireVersion(conn.ws, wire);
     queueRaw(conn.ws, encode(welcome));
     try {

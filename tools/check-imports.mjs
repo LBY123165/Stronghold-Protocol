@@ -208,6 +208,12 @@ export function classify(spec, fromFile, area) {
   }
   const escaped = resolved.startsWith('..') || path.posix.isAbsolute(spec);
   if (area === 'sim') {
+    // server/sim/nodeData.js is the Node-only default data loader: the browsers never load it (they inject the
+    // fetched /data/*.json instead), so its Node builtins are allowed.
+    if (fromFile === 'server/sim/nodeData.js') {
+      if (isBuiltin(spec)) return { note: true, resolved };
+      return null;
+    }
     if (resolved === 'server/match' || resolved.startsWith('server/match/')) return { code: 'sim-match', resolved };
     if (resolved === 'server/lobby.js' || resolved.startsWith('server/lobby/')) return { code: 'sim-lobby', resolved };
     if (resolved === 'server/index.js') return { code: 'sim-entry', resolved };

@@ -130,9 +130,17 @@ export {
  *                     close: () => Promise<void> }>}
  */
 export async function startServer(opts = {}) {
+  // Validate operator options before starting any session/watch timers.
+  const emergencyOptions = bandwidthEmergencyOptions(opts.bandwidthEmergency === false ? { enabled: false } : opts.bandwidthEmergency || {});
   // A release ignores external-AI settings (one log line) and keeps the built-in bot (§35.66).
   // An unknown strategy id still fails here, before data is loaded or the port is opened.
-  const log = opts.log || makeLogger(!!opts.quiet);
+  const baseLog = opts.log || makeLogger(!!opts.quiet);
+  // 运维后台 (docs/ADMIN.md): mirror the process log into a bounded ring so the console can show recent lines. A new
+  // logger object wraps it (never the caller's object, which may be a shared singleton). Off unless a secret is set.
+  // `opts.adminSecret` is for tests and embedders; the environment (ADMIN_SECRET / ADMIN_SECRET_FILE) is the normal path.
+  const adminSecret = readAdminSecret(opts.adminSecret ? { ...process.env, ADMIN_SECRET: String(opts.adminSecret), ADMIN_SECRET_FILE: '' } : process.env);
+  const logRing = createLogRing();
+  const log = adminSecret.secret ? withLogRing(baseLog, logRing) : baseLog;
   if (releaseIgnoresExternalAi()) noteLlmIgnored(log);
   try {
     const strategy = getBotStrategy(process.env.SP_BOT_STRATEGY);
@@ -207,7 +215,9 @@ export async function startServer(opts = {}) {
     : null;
   log.info(`[versions] enabled: ${versions.ids.map((id) => `${id} (${t(/** @type {any} */ (versionById(id)).label)}${id === versions.defaultId ? ', default' : ''})`).join(', ')}`);
   const simPool = createRoomWorkerPool({ data });
-  const { registry, lobby, network } = createSessionStack(opts, { data, log, content, plugins: roomSets, hosts, versions, versionHosts, simPool });
+  const { registry, lobby, network } = createSessionStack({ ...opts, accounts }, { data, log, content, plugins: roomSets, hosts, versions, versionHosts, simPool, onebot });
+  // 公告的实时推送 (docs/ANNOUNCEMENTS.md): only a command submitted to a running server is broadcast (started below)
+  const announcementNotices = createAnnouncementNoticeMonitor({ store: announcements, network, log });
   // Main-thread event-loop delay sampling (server/health/eventLoop.js): opt-in with SP_LOOP_SAMPLE=1, no worker pool involved, and a
   // LOCAL log line per window (`[loop] p50=… p95=… p99=… max=… cpu=… mem=… rooms=… humans=… phase=…`) — deliberately not
   // part of /healthz. This is what tells an operator whether a stall is the rehearsal / battle slice or something else.
@@ -226,7 +236,7 @@ export async function startServer(opts = {}) {
         phase: [...phases].sort().join('+') || 'idle', rehearsals };
     },
   });
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, assetIndex, views, visual, contents, versions });
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, simDir, packsDir, pluginsDir, packs, content, log, assetIndex, views, visual, contents, versions, runtimeCache: opts.runtimeCache });
   // the plugin studio (DESIGN §32.9): its page and API for this machine and the local network; it watches plugins/ only
   // once it is used (hot reload), and rooms whose host is the author or alone follow a plugin's changes by themselves
   const studio = opts.studio === false ? null : createStudio({ publicDir, pluginsDir, dataDir, registry: packs, lobby, sessions: registry, log, fetch: opts.fetch });
@@ -260,7 +270,39 @@ export async function startServer(opts = {}) {
   buildTag(ROOT, { servedVersionDirs: versions.servedDirs() });
 
   const traffic = createTrafficCounter();
-  const server = http.createServer(createRequestHandler({ serveStatic, csp: process.env.SP_CSP === 'off' ? null : siteCsp(publicDir), health: { startedAt, network, registry, lobby, content, traffic, assetIndex, views, trusted:trustedRuntime?.health, versions, versionHosts }, log, trustProxy: network.opts.trustProxy, studio, trustedRuntime }));
+  let requestHandler;
+  // 带宽紧急保护 (docs/SERVER_SETTINGS.md): the owner's protection against a slow downloader freezing every match.
+  // It watches the traffic counters and the cache's own metrics, and cuts new access plus the running matches.
+  const bandwidthEmergency = createBandwidthEmergencyController({
+    ...(opts.bandwidthEmergency || {}), ...emergencyOptions,
+    getMetrics: () => assetCache.metrics(), getCongestion: () => network.congestion(),
+    canResume: () => [...lobby.rooms.values()].every((room) => !room.match || room.activeHumans().some((seat) => seat.connected)),
+    log,
+    onChange: (state) => {
+      if (state.active) {
+        assetCache.trip(state.reason);
+        requestHandler?.abortPublicRequests();
+        // `finish` only means handed to TCP, not delivered. Close ordinary HTTP sockets too,
+        // including finished keep-alive transfers; Node deliberately excludes upgraded WebSockets.
+        server.closeAllConnections?.();
+      } else assetCache.resume();
+      network.setEmergency(state);
+      lobby.setEmergency(state);
+      log.warn(`[bandwidth-emergency] ${state.active ? state.action === 'retry-delayed'
+        ? '现有对局仍未具备恢复条件，继续保护' : '保护开启，下载和新访问已切断，对局冻结'
+        : '尝试恢复访问和对局'} (${state.reason || 'recovery'})`);
+    },
+  });
+  // 运维后台 (docs/ADMIN.md): the console's own API. Off unless a secret is set.
+  const adminService = createAdminService({
+    ring: logRing, log, startedAt, build: buildTag,
+  });
+  const admin = createAdminHandler({ admin: adminService, serveStatic, log });
+  requestHandler = createRequestHandler({ serveStatic, csp: process.env.SP_CSP === 'off' ? null : siteCsp(publicDir),
+    announcements, assetCache, admin, accounts, emergency: () => network.emergency,
+    health: { startedAt, network, registry, lobby, content, traffic, assetIndex, views, trusted: trustedRuntime?.health, bandwidthEmergency, versions, versionHosts },
+    log, trustProxy: network.opts.trustProxy, studio, trustedRuntime });
+  const server = http.createServer(requestHandler);
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic, extraUpgrade: onebot.upgradeHook });
   // Prime before accepting connections; only commands submitted to a running server are broadcast.

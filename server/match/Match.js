@@ -500,6 +500,12 @@ export class Match {
     this.setupRevision = 0;
     this.setupVote = null;
     this._setupVoteSeq = 0;
+    // 断线接管投票 (GitHub #338 follow-up): the open vote about a disconnected seat, the seat that waits for the
+    // room's decision, and the pending grace timers.
+    this.takeoverVote = null;
+    this.takeoverPending = null;
+    this._takeoverVoteSeq = 0;
+    this._takeoverGrace = new Map();
     /** @type {Map<string, number>} last accepted 重刷本局 start per seat (30 s cooldown; DESIGN §28.21) */
     this._rerollStartAt = new Map();
     this._turnTimer = null;
