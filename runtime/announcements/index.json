@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "revision": "pub-mvl6nzaj-ace2a6dc-0b9d-4fdb-8fbc-5e6eba65461b",
+  "pinnedId": "ann-mvi4cu8t-58c212a9-acc",
+  "items": [
+    {
+      "id": "ann-mvl6nzae-a02fa226-cb5",
+      "title": "账号登录后发布",
+      "publishedAt": "2026-10-23T16:27:28.742Z",
+      "revision": "pub-mvl6nzaj-ace2a6dc-0b9d-4fdb-8fbc-5e6eba65461b",
+      "bytes": 27,
+      "sha256": "f088d4af8d5c80d6fd2fe163365704a497cd83498197ef33561547457c49de99",
+      "author": "test-op"
+    },
+    {
+      "id": "smoke",
+      "title": "冒烟测试公告（已修改）",
+      "publishedAt": "2026-10-23T16:03:01.783Z",
+      "revision": "upd-mvl5sv7i-71ef0578-61d1-491c-b686-b9cf63a8c790",
+      "author": "owner",
+      "bytes": 58,
+      "sha256": "1bc692199b2164b726e0e20400a8d0f3d7a685321925132d7730bc3779ec51ca"
+    },
+    {
+      "id": "ann-mvi4cu8t-58c212a9-acc",
+      "title": "开服公告",
+      "publishedAt": "2026-10-21T12:59:31.229Z",
+      "revision": "pub-mvi4cu96-46d38f87-3a17-4d3e-a375-c72a0ffe8ba4",
+      "author": null,
+      "bytes": 51,
+      "sha256": "d46faed6acb9ce400aa802cbdb3131fd79c5a6477a7ff934844f16878133b361"
+    }
+  ]
+}
