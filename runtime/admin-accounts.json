@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "accounts": {
+    "test-op": {
+      "id": "test-op",
+      "name": "测试账号",
+      "salt": "aa3199214ff20d118c93b1304576e8bd",
+      "passwordHash": "0b069501087ac369afeb67ffdf9297023b724f087e7bab8178a87bbc14597def4583444e4c369b5a2854a581b47fcb2dd4e2b5952e5245f88a152a3c6a65f8a6",
+      "createdAt": 1792771369839,
+      "disabled": false,
+      "lastLoginAt": 1792772837695
+    }
+  }
+}

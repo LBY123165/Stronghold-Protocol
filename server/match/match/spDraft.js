@@ -8,7 +8,6 @@ import { PHASE, ERR } from '../../../shared/constants.js';
 import { generateGroupDrafts, applyCard, bountyBattles, isMultiRoundBounty, bountyCard } from '../choices.js';
 import { onPickCard } from '../botEmotes.js';
 import { weightedPick } from '../waves.js';
-import { botPickCard } from '../bot.js';
 import { OK, fail, DELAYS } from './common.js';
 import { installDraftFacade } from './phases.js';
 
@@ -64,30 +63,15 @@ export class MatchSpDraft {
       if (ps && ps.alive && !ps.left && s.picks[ps.playerId] == null) break;
       g.idx++;
     }
-    this.prioritizeDraftOrder(g.order, g.idx);
-    const available = g.cards.filter((c) => this.spCardAvailable(c, g)).map((c) => c.idx);
-    g.done = g.idx >= g.order.length || !available.length;
-    if (g.done) {
-      this.syncDraftDeadline(s);
-      this.markPublic();
-      if (s.groups.every((x) => x.done) && !s.finishPending) {
-        s.finishPending = true;
-        this.later(0, () => {
-          if (this.sp === s && this.phase === PHASE.SP_DRAFT && s.groups.every((x) => x.done)) this.finishSpDraft();
-        });
-      }
-      return;
-    }
-    const token = g.token;
-    if (!g.untimed) {
-      const first = g.idx === 0;
-      const secs = first ? this.gd.timer('spFirst') : this.gd.timer('spTurn');
-      const ms = this.scaled(secs * 1000);
-      g.turnSeconds = ms / 1000;
-      g.turnDeadline = this.sched.now() + ms;
-      g.timer = this.later(ms, () => {
-        if (this.phase !== PHASE.SP_DRAFT || this.sp !== s || token !== g.token) return;
-        const ps = this.players.get(g.order[g.idx]);
+    const available = s.cards.filter(c => this.spCardAvailable(c)).map(c => c.idx);
+    if (s.idx >= s.order.length || !available.length) { this.setDeadline(0); this.later(0, () => this.finishSpDraft()); return; }
+    const token = ++this._turnToken;
+    if (!s.untimed) {
+      const first = s.idx === 0;
+      const secs = this.isSolo && this.gd.config.version?.rules?.soloTimed ? 150 : first ? this.gd.timer('spFirst') : this.gd.timer('spTurn');
+      this.setDeadline(secs, () => {
+        if (this.phase !== PHASE.SP_DRAFT || token !== this._turnToken) return;
+        const ps = this.players.get(this.spTurn());
         if (!ps) return;
         const avail = g.cards.filter((c) => this.spCardAvailable(c, g)).map((c) => c.idx);
         if (!avail.length) { this.startSpTurn(g); return; }
@@ -109,9 +93,13 @@ export class MatchSpDraft {
       if (this.phase !== PHASE.SP_DRAFT || this.sp !== s || token !== g.token) return;
       const ps = this.players.get(g.order[g.idx]);
       if (!ps || !ps.botControlled) return;
-      const avail = g.cards.filter((c) => this.spCardAvailable(c, g)).map((c) => c.idx);
-      if (!avail.length) { this.startSpTurn(g); return; }
-      this._applyCard(ps, botPickCard(this, ps, g.cards, avail));
+      const avail = this.sp.cards.filter(c => this.spCardAvailable(c)).map(c => c.idx);
+      if (!avail.length) return;
+      const fallback = () => this._applyCard(ps, this.bot.pickCard(this, ps, this.sp.cards, avail));
+      if (this.bot.decide?.(this, ps, { kind: 'card',
+        valid: () => this.phase === PHASE.SP_DRAFT && token === this._turnToken,
+        complete: () => this.sp?.picks[ps.playerId] != null, fallback })) return;
+      fallback();
     });
   }
 
@@ -203,7 +191,7 @@ export class MatchSpDraft {
     if (!pending) return undefined;
     const indices = pending.cards.map((c, i) => i);
     const idx = mode === 'bot'
-      ? botPickCard(this, ps, pending.cards.map((c) => bountyCard(this.gd, c)), indices)
+      ? this.bot.pickCard(this, ps, pending.cards.map((c) => bountyCard(this.gd, c)), indices)
       : this.rngMeta.pick(indices);
     return this.pickPersonalChoice(ps, idx, pending.id);
   }
