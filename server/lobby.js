@@ -1091,6 +1091,8 @@ export class Lobby {
     // 我们的分支：房间席位按容量分配（共享/playerCapacity.js），solo 固定 1 席
     const room = new Room(code, mode, difficulty, this.now(), mode === 'solo' ? 1 : capacity, version);
     room.test = test === true;
+    // 新房间继承服务器当前的 AI 席位上限（运行时策略，room-management.test.js）
+    room.maxAiPerRoom = this.maxAiPerRoom;
     // 「不限时」 only on a solo room of a version whose solo is timed (header). Anywhere else the key is ignored, so a
     // stray true cannot change a default or co-op create.
     if (mode === 'solo' && soloUnlimited === true && this.versionSoloTimed(version)) room.soloUnlimited = true;

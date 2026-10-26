@@ -503,6 +503,8 @@ test('gameplay plugins: refused in a version room and for a proposal while on; c
   h.clock.t += 1000;
   const g = h.player('Guest');
   room.mode = 'coop'; // (a second human for a vote)
+  // 本分支的房间按容量分配座位（shared/playerCapacity.js）：solo 房间只有 1 座，改成 coop 后要显式扩容
+  ok(h.lobby.setCapacity(p, { capacity: 4 }));
   ok(h.lobby.join(g, { code: room.code }));
   ok(h.lobby.proposeVersion(p, { version: 'act1autochess' }));
   plugins.resolve = (ids, opts) => (opts.gameplay === false ? { error: ERR.PLUGIN_BLOCKED } : resolve(ids, opts));
