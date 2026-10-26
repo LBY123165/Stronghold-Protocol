@@ -15,12 +15,18 @@ export class PlayerItems {
   /**
    * A copy that actually leaves the match repays shared-item debt first (#624). Equipping, selling a carrier
    * (the item returns to the hand) and a merge that keeps the golden do not call this.
+   *
+   * The debt belongs to the pool the copy was counted in — the seat's own fixed group, not the first group's
+   * compatibility pool (the fork's grouped pools): repaying another group's pool clears nothing here and leaves
+   * this group's overage on record.
    * @param {any} piece
    * @returns {number} copies repaid
    */
   releaseItemStock(piece) {
-    if (!piece || piece.kind !== 'item' || !this.m?.itemPool) return 0;
-    return this.m.itemPool.repay(piece.id, this.m.itemPool.need(piece.id));
+    if (!piece || piece.kind !== 'item') return 0;
+    const pool = this.m?.itemPoolFor ? this.m.itemPoolFor(this) : this.m?.itemPool;
+    if (!pool) return 0;
+    return pool.repay(piece.id, pool.need(piece.id));
   }
 
   /**

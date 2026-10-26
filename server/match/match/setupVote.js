@@ -118,7 +118,9 @@ export class MatchSetupVote {
     this.bannedChess = bans.banned;
     this.poolGroups = poolGroups;
     this.playerPools = playerPools;
-    this.pool = poolGroups[0].pool;
+    // The rerolled opening replaces every pool, so the first group's pool is the new one (the setter would also
+    // repoint the seats, but the maps above already carry the rerolled pools).
+    this._pool = poolGroups[0].pool;
     this._botPath = null;
     for (const [i, ps] of this.order.entries()) {
       ps.diyStock = stocks[i].stock;

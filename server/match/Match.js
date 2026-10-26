@@ -477,7 +477,7 @@ export class Match {
     this.poolGroups = createPoolGroups(this.gd, this.order, { banned: bans.banned });
     this.playerPools = new Map(this.poolGroups.flatMap((g) => g.playerIds.map((id) => [id, g.pool])));
     // Compatibility for single-pool diagnostics; player transactions use poolFor / ps.pool / ps.poolOf.
-    this.pool = this.poolGroups[0].pool;
+    this._pool = this.poolGroups[0].pool;
     // 自选编队 (0.2.0): each human's slotted DIY pieces get their own stock — none for one whose bonds are all off this
     // match (player/diy.js initDiyStock); no randomness is drawn here
     const off = new Set([...bans.drawn, ...bans.staticOff]);
@@ -557,6 +557,31 @@ export class Match {
     // above). The input journal records the steps that callback took; replay stops there.
     this.externalAI = createExternalAI(this, opts);
     if (this.test && opts.journal !== false) installTestTrace(this, opts);
+  }
+
+  /**
+   * The match's shared pool — the first fixed group (compatibility for single-pool diagnostics; player transactions
+   * always select their own group through poolFor / ps.pool / ps.poolOf).
+   *
+   * Assigning it swaps the pool of every seat that shared the old one: upstream treats `m.pool` as the single source
+   * of truth (its poolOf reads it directly), so a caller that replaces the pool — a test isolating the draws from the
+   * banned chess, for instance — must not leave the seats on the stale one. The poolGroups array and the playerPools
+   * map keep their identity (the capacity tests assert it); only the pools they point at change, so the invariant
+   * check still matches a seat to its group.
+   */
+  get pool() { return this._pool; }
+  set pool(value) {
+    const old = this._pool;
+    this._pool = value;
+    if (!old || old === value) return;
+    for (const group of this.poolGroups || []) {
+      if (group.pool === old) group.pool = value;
+    }
+    if (this.playerPools) {
+      for (const [playerId, pool] of this.playerPools) {
+        if (pool === old) this.playerPools.set(playerId, value);
+      }
+    }
   }
 
   /** First-group compatibility for diagnostics; player transactions always select their fixed group. */

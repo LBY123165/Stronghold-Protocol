@@ -39,8 +39,19 @@ test('a duplicate draft card becomes unavailable when the preceding player exhau
   const m = h.m, a = h.ps('p_0'), b = h.ps('p_1');
   a.acquireItem(PACK);
   m.phase = PHASE.SP_DRAFT;
-  m.sp = { cards: [PACK, PACK, 'chess_item_1_01_e_a'].map((id, idx) => ({ idx, id, kind: 'item' })),
-    order: ['p_0', 'p_1'], idx: 0, picks: {}, taken: {}, untimed: true };
+  // The fork's 机变 draft runs per fixed pool group (server/match/match/spDraft.js): the page lives on the group,
+  // and the stage exposes the first group's fields through the facade (installDraftFacade).
+  const cards = [PACK, PACK, 'chess_item_1_01_e_a'].map((id, idx) => ({ idx, id, kind: 'item' }));
+  const group = { id: 1, playerIds: ['p_0', 'p_1'], order: ['p_0', 'p_1'], idx: 0, picks: {},
+    cards, taken: {}, done: false, untimed: true, turnDeadline: 0, turnSeconds: 0, token: 0 };
+  m.sp = { id: 'sp:test', groups: [group], picks: {}, untimed: true };
+  for (const field of ['order', 'idx', 'cards', 'taken', 'turnDeadline', 'turnSeconds']) {
+    Object.defineProperty(m.sp, field, {
+      enumerable: true,
+      get() { return this.groups[0]?.[field]; },
+      set(value) { if (this.groups[0]) this.groups[0][field] = value; },
+    });
+  }
   assert.ok(m.pickCard(a, 0).ok); assert.equal(m.spTurn(), 'p_1');
   assert.equal(m.pickCard(b, 1).error, 'SOLD_OUT'); assert.equal(m.sp.picks.p_1, undefined);
   const card = m.publicView().sp.cards[1]; assert.equal(card.soldOut, true);
