@@ -150,9 +150,6 @@ export class MatchPhases {
     this.phase = PHASE.BAND_DRAFT;
     // The opening is settled, so no reroll cooldown outlives this phase.
     this._rerollStartAt.clear();
-    let order = this.order.map((p) => p.playerId);
-    if (!this.isSolo) this.rngDraft.shuffle(order);
-    order = this.humansFirst(order);
     const skips = this.isSolo ? 0 : this.gd.bandDraft.skipsPerPlayer;
     const untimed = this.soloUntimed;
     const groups = this.makeDraftGroups();
