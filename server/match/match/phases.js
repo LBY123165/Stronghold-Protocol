@@ -178,7 +178,7 @@ export class MatchPhases {
     const g = group;
     this.clearDraftGroupTimer(g);
     if (this.test) this.setDeadline(0);
-    while (g.idx < g.order.length) {
+    while (g.idx < g.order.length) { // loop-cap: the group's order length
       const ps = this.players.get(g.order[g.idx]);
       if (ps && ps.alive && !ps.left && !d.picks[ps.playerId]) break;
       g.idx++;

@@ -161,7 +161,7 @@ export function uniteRemainingLeaks(plan, result) {
   };
   const take = (q) => {
     if (!q) return null;
-    while (q.cursor < q.rows.length && q.rows[q.cursor].used) q.cursor++;
+    while (q.cursor < q.rows.length && q.rows[q.cursor].used) q.cursor++; // loop-cap: the queue's row count
     const row = q.rows[q.cursor++] || null;
     if (row) row.used = true;
     return row;
