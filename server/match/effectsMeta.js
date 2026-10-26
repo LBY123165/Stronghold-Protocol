@@ -650,9 +650,12 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
       // 0.3.1's behaviour (the golden digests are its): the pool roll gets the plain filter; `opts.bond` and
       // `opts.ignoreCounts` are not passed on (server/match/builtinMeta.js asks for ignoreCounts, upstream drops it).
       const filter = typeof opts.filter === 'function' ? (id) => !!opts.filter(id) : null;
-      return ps.pool.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter, extra });
+      // A preview (the stats estimate, a bot rehearsal) must not consume the live match stream: every candidate
+      // then starts at the same RNG position, and the live fight keeps its own sequence. `rolls` carries the
+      // preview's cloned rngMeta; the live match rolls from m.rngMeta as before (the golden digests are its).
+      return ps.pool.roll(rolls.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter, extra });
     },
-    rollItem: (opts = {}) => m.rollItemId({ ...opts, player: ps }),
+    rollItem: (opts = {}) => rolls.rollItemId({ ...opts, player: ps }),
     /**
      * Roll a choices.json pool: equip pools → { kind: 'item', id }; chess pools (items / weighted / shopEligible with
      * tier, minTier, bond, golden) → { kind: 'chess', id, golden } (a pool chess needs a free copy). null when empty.
