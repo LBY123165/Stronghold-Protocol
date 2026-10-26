@@ -647,13 +647,14 @@ export function makeCtx(m, ps, source, hook, ev = null, preview = null) {
         return typeof opts.filter === 'function' ? !!opts.filter(id) : true;
       };
       const extra = typeof ps.diyStockEntries === 'function' ? ps.diyStockEntries() : null;
-      // 0.3.1's behaviour (the golden digests are its): the pool roll gets the plain filter; `opts.bond` and
-      // `opts.ignoreCounts` are not passed on (server/match/builtinMeta.js asks for ignoreCounts, upstream drops it).
-      const filter = typeof opts.filter === 'function' ? (id) => !!opts.filter(id) : null;
+      // The pool roll gets the full filter: `f` keeps `opts.bond` (the chess that carries the bond) together with
+      // `opts.filter`. Dropping the bond clause (the capacity port rewrote `filter: f` as a plain `opts.filter`)
+      // widened every bond-scoped draw to the whole pool, so the picks and the RNG sequence left the official's.
+      // `opts.ignoreCounts` stays unpassed as in 0.3.1: the copy-weighted roll is the branch's digest baseline.
       // A preview (the stats estimate, a bot rehearsal) must not consume the live match stream: every candidate
       // then starts at the same RNG position, and the live fight keeps its own sequence. `rolls` carries the
       // preview's cloned rngMeta; the live match rolls from m.rngMeta as before (the golden digests are its).
-      return ps.pool.roll(rolls.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter, extra });
+      return ps.pool.roll(rolls.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra });
     },
     rollItem: (opts = {}) => rolls.rollItemId({ ...opts, player: ps }),
     /**
