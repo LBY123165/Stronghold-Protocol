@@ -236,8 +236,8 @@ export class MatchPhases {
         this._applyBand(ps, id, { dedupe: true });
       };
       if (this.bot.decide?.(this, ps, { kind: 'band',
-        valid: () => this.phase === PHASE.BAND_DRAFT && token === this._turnToken,
-        complete: () => token !== this._turnToken || !!this.draft?.picks[ps.playerId], fallback })) return;
+        valid: () => this.phase === PHASE.BAND_DRAFT && token === g.token,
+        complete: () => token !== g.token || !!this.draft?.picks[ps.playerId], fallback })) return;
       fallback();
     });
   }

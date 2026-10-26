@@ -48,11 +48,11 @@ export class MatchPlatform {
   /** Shared human / external-AI semantic validation and dispatch. C2S schema: net.js / the adapter. */
   _handleSeatIntent(ps, msg) {
     // a spectator seat only watches (the platform routes nothing else of it)
-    if (session.spectator && (!msg || msg.t !== 'g.watch')) {
+    if (ps.spectator && (!msg || msg.t !== 'g.watch')) {
       // g.test shares the host's rate bucket (applyTestCommand audits SPECTATOR after the stamp).
       if (this.test && msg?.t === 'g.test') {
         let res;
-        try { res = this.applyTestCommand(session, msg); }
+        try { res = this.applyTestCommand(ps, msg); }
         catch (e) { this.reportError('handle g.test', e); res = fail(ERR.INTERNAL); }
         try { this.flush(); } catch (e) { this.reportError('flush', e); }
         return res && res.error ? res : OK;
@@ -69,16 +69,16 @@ export class MatchPlatform {
     if (this.emergencyFrozen && !EMERGENCY_SAFE_TYPES.has(msg.t)) return fail(ERR.SERVER_EMERGENCY);
     let res;
     try {
-      let seat = session;
+      let seat = ps;
       if (msg.t === 'g.control') {
-        res = this.controlSeat(session, msg.playerId ?? null);
+        res = this.controlSeat(ps, msg.playerId ?? null);
       } else {
         // 断线接管: gameplay intents act for the seat on screen; identity / vote / chat intents stay with the
         // client's own session (its own seat remains a voter and a host).
-        if (session.activeSeat && !SESSION_INTENTS.has(msg.t)) {
-          const target = this.players.get(session.activeSeat);
-          if (target && !target.left && target.controlledBy === session.playerId) seat = target;
-          else { session.activeSeat = null; this._sendControl(session, { clear: true }); }
+        if (ps.activeSeat && !SESSION_INTENTS.has(msg.t)) {
+          const target = this.players.get(ps.activeSeat);
+          if (target && !target.left && target.controlledBy === ps.playerId) seat = target;
+          else { ps.activeSeat = null; this._sendControl(ps, { clear: true }); }
         }
         res = this._handle(seat, msg);
       }

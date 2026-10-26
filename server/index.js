@@ -295,6 +295,8 @@ export async function startServer(opts = {}) {
   });
   // 运维后台 (docs/ADMIN.md): the console's own API. Off unless a secret is set.
   const adminService = createAdminService({
+    enabled: !!adminSecret.secret, secret: adminSecret.secret, secretSource: adminSecret.source, problem: adminSecret.problem,
+    lobby, network, registry, bandwidthEmergency, assetCache, serverSettings, announcements, accounts, adminAccounts, onebot,
     ring: logRing, log, startedAt, build: buildTag,
   });
   const admin = createAdminHandler({ admin: adminService, serveStatic, log });
