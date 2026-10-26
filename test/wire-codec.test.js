@@ -18,8 +18,11 @@ const nameOf = (f) => typeof f === 'string' ? f : f[0];
 // Fields introduced after v1 was published use its existing extension slot. Keep this allowlist
 // explicit: adding a business field must not silently weaken coverage or renumber the fixed catalog.
 const V1_EXTENSIONS = Object.freeze({
-  hello: ['accountToken'],
-  'room.create': ['assetCache', 'test'], 'room.join': ['assetCache', 'testAck'],
+  // hello.delta：上游 0.3.3 的 state 增量协商字段（shared/stateDelta.js），走 v1 既有的扩展位
+  hello: ['accountToken', 'delta'],
+  // room.create.version / soloUnlimited：上游 0.3.3 的多版本与「不限时」字段，同样走扩展位
+  'room.create': ['assetCache', 'test', 'version', 'soloUnlimited'],
+  'room.join': ['assetCache', 'testAck'],
   'lobby.quickMatch': ['assetCache'], 'room.spectate': ['assetCache', 'testAck'],
   'b.result': ['cs'],
 });
@@ -30,7 +33,10 @@ const V1_EXTENSIONS = Object.freeze({
 // join the same JSON fallback rather than renumbering the frozen v1 catalog, so the corpus hash and fingerprint hold.
 const V1_JSON_FALLBACK = Object.freeze({
   c2s: ['room.chat', 'room.lobbyChat', 'room.recruit', 'room.skins', 'b.rehearsalResult', 'g.offer', 'g.offerRefresh', 'g.test',
-    'g.unequip', 'room.consent', 'room.contentReady', 'room.setMode', 'room.setPlugins', 'g.takeoverVote', 'g.control'],
+    'g.unequip', 'room.consent', 'room.contentReady', 'room.setMode', 'room.setPlugins', 'g.takeoverVote', 'g.control',
+    // 上游 0.3.3 新增的观战席接替 / 版本投票 / 名片干员消息：同样走原 JSON 回退，不重排冻结的 v1 目录
+    'room.aiRequest', 'room.aiVote', 'room.cancelVersionVote', 'room.card', 'room.proposeVersion',
+    'room.versionVote', 'room.setAiTakeover', 'room.setSoloUnlimited', 'state.resync'],
   s2c: ['m.chat', 'm.chatState', 'm.emergency', 'b.rehearsal', 'b.rehearsalCancel', 'm.layer', 'm.control'],
 });
 

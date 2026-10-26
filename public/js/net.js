@@ -34,6 +34,7 @@ import { validateC2S } from '../../shared/protocol.js';
 import { WIRE_VERSION, encodeWire, decodeWire } from '../../shared/wireCodec.js';
 import { N_ } from '../../shared/i18n.js';
 import { STATE_DELTA_VERSION, StateReceiver } from '../../shared/stateDelta.js';
+import { assetCache } from './assetCache.js';
 
 export const REQUEST_TIMEOUT_MS = 8000;
 export const HELLO_TIMEOUT_MS = 8000;
@@ -45,6 +46,8 @@ export const BACKOFF = Object.freeze({ base: 500, factor: 2, max: 10000, jitter:
 const EMERGENCY_RETRY_MS = 120000;
 const EMERGENCY_RETRY_MIN_MS = 30000;
 const EMERGENCY_RETRY_JITTER_MS = 5000;
+/** The message kinds whose admission needs a local asset-cache scan before they are sent. */
+const ASSET_ADMISSION_TYPES = new Set(['room.create', 'room.join', 'lobby.quickMatch', 'room.spectate']);
 
 /** Client-side error codes (in addition to shared ERR codes). */
 export const CLIENT_ERR_TEXT = Object.freeze({
@@ -401,6 +404,9 @@ export class Net {
     // `delta` says this build decodes `m.state` frames (shared/stateDelta.js). A server that does not speak it ignores
     // the field, and the client then keeps receiving the plain m.public / m.private frames it always got.
     const msg = { t: 'hello', rid, name: this.name, version: PROTOCOL_VERSION, delta: STATE_DELTA_VERSION };
+    // 紧凑线路编码（shared/wireCodec.js）：客户端报上它能解的版本，服务端在 welcome 里确认后才套用。
+    if (!this._wireDisabled) msg.wire = WIRE_VERSION;
+    try { const accountToken = this.getAccountToken(); if (typeof accountToken === 'string' && accountToken.length <= 128) msg.accountToken = accountToken; } catch { /* no account */ }
     let token = null;
     try { token = this.getToken(); } catch { token = null; }
     if (typeof token === 'string' && token.length > 0 && token.length <= 64) {

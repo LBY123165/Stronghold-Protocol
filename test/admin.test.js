@@ -145,7 +145,7 @@ test('overview reports the host, the lobby counters and never the secret', async
     const { status, json, text } = await call(srv.url, '/api/admin/overview', { cookie });
     assert.equal(status, 200);
     assert.equal(text.includes(SECRET), false);
-    assert.equal(json.version.app, '0.3.1');
+    assert.equal(json.version.app, '0.3.3');
     assert.equal(typeof json.version.build, 'string');
     assert.equal(json.version.node, process.version);
     assert.equal(typeof json.host.hostname, 'string');
