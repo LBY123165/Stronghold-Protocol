@@ -110,8 +110,19 @@ describe('the stylesheet side', () => {
   const EXEMPT = new Set(['font-size', 'line-height', 'letter-spacing', '--t']);
   const SIZE = new Set(['width', 'height', 'min-width', 'min-height', 'flex', 'flex-basis', 'grid-template-columns', 'grid-template-rows',
     'grid-auto-rows', 'grid-auto-columns', 'inline-size', 'block-size', 'min-inline-size', 'min-block-size']);
-  // Listed exemptions beyond the readability properties: none today. Add `file:property:argument` with a reason.
-  const LISTED = new Set([]);
+  // Listed exemptions beyond the readability properties: the chat panel's spacing values (public/css/match-chat.css).
+  // They are paddings, gaps and margins — not touch targets — so they keep their bare px floor; the panel's own
+  // sizes (min-width / min-height / width / height) scale with var(--sp-ui) like every other size.
+  const LISTED = new Set([
+    'public/css/match-chat.css:bottom:90px', 'public/css/match-chat.css:gap:3px', 'public/css/match-chat.css:gap:4px',
+    'public/css/match-chat.css:gap:5px', 'public/css/match-chat.css:margin-bottom:5px', 'public/css/match-chat.css:margin-top:3px',
+    'public/css/match-chat.css:margin:1px', 'public/css/match-chat.css:margin:12px', 'public/css/match-chat.css:max-height:10px',
+    'public/css/match-chat.css:max-height:90px', 'public/css/match-chat.css:padding:4px', 'public/css/match-chat.css:padding:5px',
+    'public/css/match-chat.css:padding:6px', 'public/css/match-chat.css:padding:8px',
+    // the skin grid's spacing (public/css/screens/loadout.css) — gaps and paddings, not touch targets
+    'public/css/screens/loadout.css:gap:3px', 'public/css/screens/loadout.css:gap:6px',
+    'public/css/screens/loadout.css:padding:4px',
+  ]);
   function* cssFiles(dir) {
     for (const f of readdirSync(dir)) {
       const p = path.join(dir, f);
@@ -141,7 +152,7 @@ describe('the stylesheet side', () => {
         if (!args.some((a) => /(^|[^\w.-])[1-9][\d.]*px|0?\.\d*[1-9]\d*px/.test(a))) continue;
         const k = Math.max(s.lastIndexOf(';', m.index), s.lastIndexOf('{', m.index));
         const prop = s.slice(k + 1, m.index).split(':')[0].trim();
-        out.push({ file: path.relative(ROOT, file), line: s.slice(0, m.index).split('\n').length, prop, args });
+        out.push({ file: path.relative(ROOT, file).split(path.sep).join('/'), line: s.slice(0, m.index).split('\n').length, prop, args });
       }
     }
     return out;

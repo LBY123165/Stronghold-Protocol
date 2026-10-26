@@ -663,7 +663,7 @@
    264–379 px tall there, which made 皮肤 the ONE section of that panel no phone could see whole (the 潜能与练度 / 技能 /
    局内数值 / 模组 sections are 135–163 px in the same panel). On that short, narrow panel the tile draws the 1:1 avatar
    — the shape of the roster's own `.lo-card__art` — five to the row, and the section is 216 px at 844×390: it fits. */
-.lo-skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(1.1rem, 72px), 1fr)); gap: max(.08rem, 6px); align-items: start; }
+.lo-skins { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(1.1rem, 32px, calc(72px * var(--sp-ui, 1))), 1fr)); gap: max(.08rem, 6px); align-items: start; }
 .lo-skin {
   position: relative; min-width: 0; display: flex; flex-direction: column; gap: max(.03rem, 3px); padding: max(.04rem, 4px);
   font: inherit; color: var(--text-md); text-align: left; cursor: pointer;

@@ -436,14 +436,17 @@ describe('net.js', () => {
     assert.ok(ws().last('ping'), 'latency probe before hello');
     net.setName('  凯尔希  ');
     const hello = ws().last('hello');
-    // hello names the state-delta version it understands; a server that does not know the field ignores it.
+    // hello names the state-delta version it understands and the compact-wire version it can decode; a server that
+    // does not know a field ignores it.
     const { STATE_DELTA_VERSION } = await import(pathToFileURL(path.join(ROOT, 'shared/stateDelta.js')).href);
+    const { WIRE_VERSION } = await import(pathToFileURL(path.join(ROOT, 'shared/wireSchema.js')).href);
     assert.deepEqual({ ...hello, rid: 0 }, {
       t: 'hello',
       rid: 0,
       name: '凯尔希',
       version: PROTOCOL_VERSION,
       delta: STATE_DELTA_VERSION,
+      wire: WIRE_VERSION,
       token: 'tok-1',
     });
     assert.equal(net.status, 'handshaking');

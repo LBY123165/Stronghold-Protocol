@@ -48,7 +48,7 @@
 // Texts go through t() (docs/I18N.md).
 
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
+import { DIFFICULTY_NAMES, DIFFICULTY_COLORS, MAX_SEATS, DEFAULT_SEATS, MAX_SPECTATORS } from '../../../shared/constants.js';
 import {
   html, Button, Icon, MicroLabel, PingPill, AvatarFrame, DifficultyIcon, Tooltip, Spinner, confirmDialog, doctorNo, Modal,
   TextField,
@@ -61,6 +61,7 @@ import { AssetCacheButton } from '../ui/assetCache.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
 import { LoadoutButton } from './loadout.js';
+import { LobbyChatHost } from '../ui/matchChat.js';
 import { PluginTag, VersionTag, isModdedRoom } from '../ui/pluginTag.js';
 import { VersionVote, versionVoteOf } from '../ui/versionVote.js';
 import { VersionPicker } from '../ui/versionPicker.js';
@@ -111,6 +112,12 @@ export function roomFacts(room, myId) {
   const isReady = (s) => !!s.ready || s.playerId === room?.hostId;
   const readyHumans = humans.filter(isReady).length;
   const othersReady = others.every((s) => s.ready && s.connected !== false);
+  const emptySeats = seats.filter((s) => !s).length;
+  const botCount = occupied.filter((s) => s.isBot).length;
+  const maxAiPerRoom = Number.isInteger(room?.maxAiPerRoom) && room.maxAiPerRoom >= 0 ? room.maxAiPerRoom : null;
+  const aiLimitReached = maxAiPerRoom !== null && botCount >= maxAiPerRoom;
+  const aiLimitExceeded = maxAiPerRoom !== null && botCount > maxAiPerRoom;
+  const waiting = !room?.inMatch;
   // a room with gameplay plugins (DESIGN §32.6) or another official version (§35.23): every player's page has loaded and
   // checked its content (the host's too); `modded` (非官方) is the plugins' alone
   const modded = isModdedRoom(room);
@@ -657,6 +664,19 @@ export function RoomScreen() {
     if (ok) toast(what === 'code' ? t('已复制同盟密钥 {code}', { code: room.code }) : t('已复制邀请链接'), 'success');
     else toast(t('复制失败，请手动复制'), 'warn');
   };
+  // OneBot 群招募 (docs/ADMIN.md §4.4): any human of a co-op waiting room asks the server to push its recruit template
+  // to the configured QQ group. The server's cooldown comes with room.state (room.recruit.cooldownSec).
+  const [recruitLeft, setRecruitLeft] = useState(0);
+  useEffect(() => {
+    if (recruitLeft <= 0) return undefined;
+    const timer = setTimeout(() => setRecruitLeft((v) => Math.max(0, v - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [recruitLeft]);
+  const recruit = () => run('recruit', async () => {
+    await net.request('room.recruit', {});
+    setRecruitLeft(room.recruit?.cooldownSec || 0);
+    toast(t('招募信息已发送'), 'success');
+  });
   // 选择模拟协议 over the room: the host picks and sends the difficulty on 确认 (nothing to send when it did not change —
   // unless a plugin mode is on, which picking a difficulty leaves: server/lobby.js setDifficulty); it closes only once the
   // server took it, and the accepted pick becomes the remembered difficulty (`lobby.difficulty`, the one 创建同盟 and
@@ -742,7 +762,11 @@ export function RoomScreen() {
           <b class="rs-key__code num selectable" aria-label=${t('同盟密钥 {code}', { code: room.code })}>${room.code}</b>
           <button type="button" class="rs-key__copy" onClick=${() => copy('code')} title=${t('复制密钥')}>${t('复制')}</button>
           <button type="button" class="rs-key__link" onClick=${() => copy('link')} title=${t('复制链接')} aria-label=${t('复制链接')}><${Icon} name="link" /></button>
+          ${room.recruit ? html`<button type="button" class="rs-key__recruit" disabled=${recruitLeft > 0} onClick=${recruit}
+            title=${recruitLeft > 0 ? t('招募冷却中') : t('向服务器的 QQ 群发送本房间的招募信息')} aria-label=${t('招募')}>
+            <${Icon} name="signal" />${recruitLeft > 0 ? t('招募 {sec}s', { sec: recruitLeft }) : t('招募')}</button>` : null}
         </div>` : html`<div class="rs-key rs-key--solo"><${MicroLabel}>SINGLE OPERATOR<//><span>${t('仅限 1 名博士')}</span></div>`}
+        <${LobbyChatHost} room=${room} myId=${me.playerId} />
       </div>
     </header>
 
