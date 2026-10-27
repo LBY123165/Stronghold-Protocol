@@ -24,7 +24,7 @@ import { SetupReroll } from '../ui/setupReroll.js';
 import { MatchChatButton } from '../ui/matchChat.js';
 import { actions } from '../ui/gameActions.js';
 import { sortedPlayers, phaseTotalSeconds } from '../ui/gameLogic.js';
-import { useStore } from '../store.js';
+import { useStore, activeSeatId } from '../store.js';
 import { data } from '../data.js';
 import { t } from '../../../shared/i18n.js';
 

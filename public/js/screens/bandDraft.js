@@ -40,7 +40,7 @@ import { useGameData, BandIcon, RichText, PlayerAvatar, Sprite, Img } from '../u
 import { StepHeader, ExitModal } from '../ui/matchChrome.js';
 import { MatchInfoDialog, matchInfoModel } from '../ui/matchInfo.js';
 import { MatchEnemies } from '../ui/matchEnemies.js';
-import { actions, act } from '../ui/gameActions.js';
+import { actions, act, draftRequestScope } from '../ui/gameActions.js';
 import { normalizeDraft, sortedPlayers } from '../ui/gameLogic.js';
 import { useStore, activeSeatId } from '../store.js';
 import { MatchChatButton } from '../ui/matchChat.js';

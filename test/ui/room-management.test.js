@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Button } from '../../public/js/ui/components.js';
-import { roomFacts, SeatCard } from '../../public/js/screens/room.js';
+import { roomFacts, seatCardView } from '../../public/js/screens/room.js';
 
+// The seat card's markup is a plain function of its props (public/js/screens/room.js seatCardView), so the walk
+// only follows the markup it produces. A function component in the tree is left alone: rendering it needs a
+// component context (the preact hooks), and the walk is after the card's own controls.
 function* walk(node) {
   if (Array.isArray(node)) { for (const child of node) yield* walk(child); return; }
   if (!node || typeof node !== 'object') return;
@@ -51,29 +54,29 @@ test('member controls render transfer beside kick, preserve confirmed identities
   const calls = [];
   const props = { seat: guest, index: 1, room: source, facts: roomFacts(source, 'host'), myId: 'host', busy: null,
     onTransferHost: (...args) => calls.push(args), onKick: (...args) => calls.push(args) };
-  const buttons = [...walk(SeatCard(props))].filter((n) => n.type === Button);
+  const buttons = [...walk(seatCardView(props))].filter((n) => n.type === Button);
   assert.deepEqual(buttons.map((n) => n.props.icon), ['crown', 'close']);
   assert.equal(buttons[0].props['aria-label'], '转让房主给该博士');
   buttons[0].props.onClick();
   buttons[1].props.onClick();
   assert.deepEqual(calls, [[1, 'Guest', 'guest'], [1, 'Guest', 'guest']]);
-  assert.ok([...walk(SeatCard({ ...props, busy: 'transfer1' }))].filter((n) => n.type === Button).every((n) => n.props.disabled));
-  const botCard = SeatCard({ ...props, seat: bot, index: 2, onRemoveBot: (...args) => calls.push(args) });
+  assert.ok([...walk(seatCardView({ ...props, busy: 'transfer1' }))].filter((n) => n.type === Button).every((n) => n.props.disabled));
+  const botCard = seatCardView({ ...props, seat: bot, index: 2, onRemoveBot: (...args) => calls.push(args) });
   const botButtons = [...walk(botCard)].filter((n) => n.type === Button);
   assert.equal(botButtons.length, 1);
   botButtons[0].props.onClick();
   assert.deepEqual(calls.at(-1), [2, 'bot']);
-  assert.equal([...walk(SeatCard({ ...props, seat: { ...guest, connected: false } }))].filter((n) => n.type === Button).length, 1);
-  assert.equal([...walk(SeatCard({ ...props, myId: 'guest', facts: roomFacts(source, 'guest') }))].filter((n) => n.type === Button).length, 0);
+  assert.equal([...walk(seatCardView({ ...props, seat: { ...guest, connected: false } }))].filter((n) => n.type === Button).length, 1);
+  assert.equal([...walk(seatCardView({ ...props, myId: 'guest', facts: roomFacts(source, 'guest') }))].filter((n) => n.type === Button).length, 0);
 });
 
 test('empty seats explain server AI limit and block repeated or conflicting additions', () => {
   const source = room({ maxAiPerRoom: 1 });
   const props = { seat: null, index: 3, room: source, facts: roomFacts(source, 'host'), myId: 'host', busy: null };
-  const button = [...walk(SeatCard(props))].find((n) => n.type === Button);
+  const button = [...walk(seatCardView(props))].find((n) => n.type === Button);
   assert.equal(button.props.disabled, true);
   assert.equal(button.props.title, '已达到服务器允许的 AI 队友上限');
   const unrestricted = room();
-  const busyButton = [...walk(SeatCard({ ...props, room: unrestricted, facts: roomFacts(unrestricted, 'host'), busy: 'transfer1' }))].find((n) => n.type === Button);
+  const busyButton = [...walk(seatCardView({ ...props, room: unrestricted, facts: roomFacts(unrestricted, 'host'), busy: 'transfer1' }))].find((n) => n.type === Button);
   assert.equal(busyButton.props.disabled, true);
 });

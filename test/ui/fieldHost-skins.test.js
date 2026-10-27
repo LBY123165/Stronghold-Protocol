@@ -18,6 +18,8 @@ test('mounted fields adopt public skins, follow updates and identity, and unsubs
     mountFieldView = async () => guardView(raw, 'engine');
     useFieldView({ current: {} });
   `, { store, settingsStore, raw, AbortController, console, window: events, document: events,
+    // the field view follows the seat that controls the match (a managed seat included), not just me.playerId
+    activeSeatId: (s) => s?.me?.control?.active || s?.me?.playerId || null,
     useState: (s) => [s, () => {}], useRef: (s) => ({ current: s }),
     useEffect: (fn) => cleanups.push(fn()),
   });

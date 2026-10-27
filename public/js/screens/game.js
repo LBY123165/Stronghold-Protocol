@@ -1093,6 +1093,9 @@ function MatchScreen() {
     finally { buyPending.current.delete(i); }
   }, []);
   const removeSpectator = useCallback((playerId) => actions.removeSpectator(playerId), []);
+  // 联防跳过投票 (server/match/match/unitePhase.js voteSkipUnite): over half of the connected, un-managed humans
+  // agree and the rest of the 联防 waves are skipped once this round's battle ends.
+  const uniteSkipVote = useCallback((scope) => actions.uniteSkipVote(scope), []);
   // 准备 with funds left asks first: the prep's end wipes them (community report #4; not 坎诺特, not at 0 funds, not
   // under AI 托管 — gameLogic.readyFundsPrompt). The button and Space both come here.
   const askingReady = useRef(false);
@@ -1856,7 +1859,7 @@ function MatchScreen() {
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator}
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
-        held=${hudIn === 'wait'} />
+        onUniteSkipVote=${uniteSkipVote} held=${hudIn === 'wait'} />
 
       <div class="gm__bonds">
         <button type="button" class="bonds-toggle" aria-expanded=${!bondsCollapsed} aria-controls="match-bond-strip"

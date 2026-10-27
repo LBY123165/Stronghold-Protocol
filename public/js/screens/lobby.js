@@ -37,7 +37,7 @@
 import { TestMark } from '../ui/testConsole.js';
 import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, modeIdFor, ERR } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, ROOM_CAPACITIES, modeIdFor, ERR } from '../../../shared/constants.js';
 import { html, confirmDialog, Button, Icon, MicroLabel, Modal, PingPill, Spinner, DifficultyIcon, TextField } from '../ui/components.js';
 import { Sprite, Img } from '../ui/gameComponents.js';
 import { uiUrl } from '../ui/assetUrls.js';
@@ -60,8 +60,12 @@ import { data, getConfig, getMode, getStage, useData } from '../data.js';
 import { t, tc, N_ } from '../../../shared/i18n.js';
 import { scriptOf } from '../../../shared/i18nPacks.js';
 import { NoticesButton } from '../ui/notices.js';
+import { AnnouncementButton } from '../ui/announcements.js';
+import { AssetCacheButton } from '../ui/assetCache.js';
 import { VersionSwitch } from '../ui/versionPicker.js';
 import { contentSet, retryContentSet } from '../content.js';
+import { createLobbyDiscovery } from '../lobbyDiscovery.js';
+import { LobbyOnlinePill, LobbyDiscoveryPanel, LobbyRoomList } from '../ui/lobbyDiscovery.js';
 import { DEFAULT_VERSION, lobbyVersion, offeredDifficulties, fallbackDifficulty, seasonOf, soloTimedOf, soloTimeMsgid, versionLabel } from '../versions.js';
 
 /** Official mode texts (activity_table act2autochess.modeDataDict), fallback when config.json is absent. */
@@ -790,14 +794,6 @@ export function LobbyScreen() {
         <${Button} variant="secondary" size="sm" icon="book" class="lobby-sweep" onClick=${() => setSweepOpen(true)}
           title=${t('S.W.E.E.P.报告：盟约、策略与敌方资料')}>S.W.E.E.P.<//>
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
-        <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>
-          <${AvatarFrame} size="sm" name=${me.name} seat=${0} self=${true} />
-          <span class="me-chip__text">
-            <span class="me-chip__name">${me.name || t('博士')}</span>
-            <${MicroLabel}>${me.playerId != null ? `DOCTOR #${doctorNo(me.playerId)}` : 'DOCTOR'}<//>
-          </span>
-          <${Icon} name="chart" class="me-chip__stats" />
-        </button>
       </div>
     </header>
 
@@ -805,6 +801,9 @@ export function LobbyScreen() {
       <${HubTitle} />
       <aside class="hub-side">
         <${AchievementCard} onOpen=${() => setAchOpen(true)} />
+        <${LobbyDiscoveryPanel} state=${discoveryState} connected=${online} capacity=${matchCapacity}
+          onCapacity=${(n) => { setMatchCapacity(n); savePref('lobby.matchCapacity', n); }}
+          onOpen=${() => discovery.show()} onQuickMatch=${quickMatch} busy=${busy === 'quickMatch'} />
         <${HubTile} icon="key" label=${t('密钥加入')} en="JOIN WITH KEY" class="hub-tile--key" onClick=${() => setAllyOpen(true)} />
         <${TipsPanel} />
       </aside>
@@ -833,5 +832,8 @@ export function LobbyScreen() {
       soloTime=${soloTimed === true ? { on: soloFree, onToggle: setSoloFreePref } : null} />` : null}
     ${sweepOpen ? html`<${SweepReport} onClose=${() => setSweepOpen(false)} />` : null}
     ${achOpen ? html`<${AchievementDialog} onClose=${() => setAchOpen(false)} />` : null}
+    ${discoveryState.open ? html`<${LobbyRoomList} state=${discoveryState} connected=${online}
+      onClose=${() => discovery.close()} onRefresh=${() => discovery.refresh()} onPage=${(page) => discovery.page(page)}
+      onJoin=${directoryJoin} busy=${!!busy} />` : null}
   </div>`;
 }

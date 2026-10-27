@@ -21,7 +21,7 @@ import { OperatorImage, useGameData, Img, Sprite, PromotionIcon, PlayerAvatar, B
 import { normalizeResult, diyRecordFor, cardStandIn, standInForText } from '../ui/gameLogic.js';
 import { data } from '../data.js';
 import { itemIconUrl, enemyIconUrl, titleIconUrl } from '../ui/assetUrls.js';
-import { store, useStore, emptyMatch } from '../store.js';
+import { store, useStore, emptyMatch, activeSeatId } from '../store.js';
 import { audio } from '../audio.js';
 import { sentText } from '../ui/lang.js';
 import { reducedMotion } from '../ui/device.js';
