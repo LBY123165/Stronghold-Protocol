@@ -350,3 +350,12 @@
 - 同盟等待房（含观战席）的在线真人可点「招募」；模板占位符 `{room} {host} {players} {capacity} {difficulty} {mode} {link}`，未知占位符原样保留；`{link}` = `链接基址/?room=房间密钥`（QQ 里点击直接进房），基址未配置时渲染为空。同一房间按冷却拒绝（RATE），全部发送失败时不吃冷却并返回 ONEBOT_UNAVAILABLE。独立模拟、对局中与紧急保护期间不可招募；未配置时 room.state 不带 `recruit`，房间不显示按钮。
 - 原因：用户要求在房间内一键向管理后台指定的 QQ 群发送招募信息、模板与目标群后台可配；其后补充——其 OneBot 所在机器无公网、游戏服有公网，故连接方式需可自选（反向 WS），且招募信息需带可点击的直接加入链接。
 - 依据：[DEV-20261024-01](records/2026-10-24-01-onebot-recruit.md)、[运维后台说明](../ADMIN.md)；入口 `server/onebot.js`、`server/lobby.js`（`room.recruit`）、`server/admin.js`，测试 `test/onebot.test.js`。
+
+## D033
+
+**生效：WebSocket 压缩的服务端字典窗口回到 15 位（32 KiB），与容量层的 20 人房同属容量层，不采纳上游 v0.3.3 的 13 位。**
+
+- 上游 v0.3.3 把 `server/http/websocket.js WS_DEFLATE` 的服务端窗口从 15 位改为 13 位（8 KiB），理由是四人局的实测字节数与每连接约 105 KiB 的 zlib 状态。本分支的房间坐 20 人，一次 `m.public` 约 20 KB 文本——8 KiB 窗口装不下一整帧，保留的字典只能从帧中间重建，20 人房赖以省带宽的跨帧增量压缩因此失效。
+- 实测（同一套 `test/wire-pressure.test.js` 场景，84 连接 / 4 房 / 共享 0.8 Mbps）：13 位时线上 3,215,180 B、峰值代理队列 2.7 MB、40 个合成帧只送达 5–11 个，压测超时；只把窗口改回 15 位即回到 626,650 B、队列 290 KB、送达 29–38 个，压测通过。两版发送的帧数与解压后字节完全相同（3276 帧 / 64,668,240 B），差异只在压缩率。
+- 因此 `WS_DEFLATE` 取：服务端 15 位窗口、保留服务端上下文（`clientNoContextTakeover: true` 使入站不保留上下文）、`threshold: 1024`、zlib level 6 / memLevel 7、全局压缩并发上限 4。服务端 `serverNoContextTakeover` 不显式写 `false`——ws 在该值为 `false` 时会拒绝一切带 `server_no_context_takeover` 的客户端提议（握手 400），而上游的压缩用例要求这类客户端能连上。
+- 依据：[上游合并记录](records/2026-10-27-01-upstream-v0.3.3-merge.md)；入口 `server/http/websocket.js`，测试 `test/ws-compression.test.js`、`test/wire-pressure.test.js`。

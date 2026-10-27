@@ -1,5 +1,5 @@
 // WebSocket permessage-deflate (server/http/websocket.js WS_DEFLATE, host bandwidth layer 0). A browser-like client
-// negotiates it with server context takeover and an 8 KB server window; a large JSON frame goes out compressed and the
+// negotiates it with server context takeover and a 32 KB server window; a large JSON frame goes out compressed and the
 // same frame again costs a fraction (the window is kept); a frame under the 1 KB threshold stays plain even though the
 // context is kept, on its own RSV1 bit; a client that requires `server_no_context_takeover` gets no such saving, which
 // is what makes the "context is kept" assertion meaningful; every connection has its own window.
@@ -55,7 +55,7 @@ describe('WebSocket permessage-deflate', () => {
   before(async () => { srv = await fakeServer(); });
   after(async () => { await srv.close(); });
 
-  test('negotiated with server context takeover and an 8 KB server window; small frames stay plain', async () => {
+  test('negotiated with server context takeover and a 32 KB server window; small frames stay plain', async () => {
     const { response, frames } = await exchange(srv, [SMALL, BIG]);
     assert.match(response, /sec-websocket-extensions: permessage-deflate/i);
     assert.doesNotMatch(response, /server_no_context_takeover/);
