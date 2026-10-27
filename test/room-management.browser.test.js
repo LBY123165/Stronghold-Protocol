@@ -144,7 +144,10 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
         const layout = await hostPage.evaluate((transferSelector, kickSelector) => {
           const rect = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
           const transfer = document.querySelector(transferSelector), seat = transfer.closest('.seat');
-          const kick = seat.querySelector(kickSelector), state = seat.querySelector('.seat__state');
+          // The upstream 0.3.3 card keeps the host's 移出 button as the card's corner badge (.rseat__kick); the seat foot
+          // holds only the branch's 转让房主 button, so the two no longer share a row.
+          const kick = seat.querySelector(kickSelector);
+          const state = seat.querySelector('.rseat__said');
           const hit = (el) => { const r = el.getBoundingClientRect(); const target = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { matched: target === el || el.contains(target), target: target?.outerHTML.slice(0, 400) }; };
           const transferHit = hit(transfer), kickHit = hit(kick);
           const before = (el) => { const s = getComputedStyle(el, '::before'); return { content: s.content, width: s.width, height: s.height, left: s.left, transform: s.transform, pointerEvents: s.pointerEvents }; };
@@ -156,9 +159,14 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
         await hostPage.screenshot({ path: path.join(OUT, `room-${capacity}-${viewport.width}.png`) });
         assert.equal(layout.seatCount, capacity);
         assert.equal(layout.humanCount, 2);
-        assert.ok(layout.transfer.right <= layout.kick.left + 1, `transfer/kick overlap at ${capacity} seats ${viewport.width}px`);
-        assert.ok(layout.state.right <= layout.transfer.left + 1, `status/actions overlap at ${capacity} seats ${viewport.width}px`);
-        assert.ok(layout.transfer.left >= layout.seat.left && layout.kick.right <= layout.seat.right, 'actions stay in their seat card');
+        // the corner badge hangs over the card's edge by design (the upstream .rseat__kick), so it is compared with the
+        // card's own box and not required to stay inside it
+        assert.ok(layout.transfer.right <= layout.seat.right + 1, `transfer leaves the card at ${capacity} seats ${viewport.width}px`);
+        // the seat's state is inside the card's art and the 转让房主 button in its foot: they are apart vertically, so
+        // only a real rectangle overlap would be a defect
+        const apart = (a, b) => a.bottom <= b.top + 1 || b.bottom <= a.top + 1 || a.right <= b.left + 1 || b.right <= a.left + 1;
+        assert.ok(apart(layout.state, layout.transfer), `status/actions overlap at ${capacity} seats ${viewport.width}px`);
+        assert.ok(layout.transfer.left >= layout.seat.left, 'actions stay in their seat card');
         assert.ok(layout.transferHit && layout.kickHit, `both buttons have unobstructed click targets at ${capacity} seats ${viewport.width}px`);
         assert.ok(layout.rootScrollWidth <= layout.viewportWidth + 2, 'room does not introduce document horizontal overflow');
       }
@@ -184,9 +192,10 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
     await hostPage.waitForFunction(() => !document.querySelector('[aria-label="转让房主给该博士"]'));
     assert.equal((await intent(hostPage, 'room.addBot')).code, 'NOT_HOST', 'server also revokes old host authority');
     await guestPage.waitForSelector(TRANSFER);
-    assert.equal(await guestPage.$eval('.room-bar__right .btn--xl', (el) => el.disabled), true, 'new host waits for original host readiness');
-    await hostPage.click('.room-bar__right .btn--xl');
-    await guestPage.waitForFunction(() => !document.querySelector('.room-bar__right .btn--xl')?.disabled);
+    // the upstream 0.3.3 room's big button (the foot's 开始模拟 / 准备就绪) is the .proto-start.rs-go, not a .btn--xl
+    assert.equal(await guestPage.$eval('.room-bar__right .proto-start', (el) => el.disabled), true, 'new host waits for original host readiness');
+    await hostPage.click('.room-bar__right .proto-start');
+    await guestPage.waitForFunction(() => !document.querySelector('.room-bar__right .proto-start')?.disabled);
     for (let i = 0; i < 5; i++) assert.equal((await intent(guestPage, 'room.addBot')).t, 'ok');
     await guestPage.waitForFunction(() => globalThis.__SP__.store.get().room.seats.filter((s) => s?.isBot).length === 5);
     assert.equal(await guestPage.$('.room-ai-limit'), null, 'unrestricted rooms have no invented limit badge');
@@ -203,7 +212,8 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
     };
     await apply('2', 2);
     assert.match(await guestPage.$eval('.room-ai-limit', (el) => el.textContent), /AI 队友 2 \/ 2/);
-    assert.equal(await guestPage.$$eval('.seat--empty button', (buttons) => buttons.length > 0 && buttons.every((button) => button.disabled)), true);
+    // the empty seat's 邀请 button (copy the key) stays usable; only 添加 AI 队友 is disabled by the owner's limit
+    assert.equal(await guestPage.$$eval('.seat--empty .rseat__add', (buttons) => buttons.length > 0 && buttons.every((button) => button.disabled)), true);
     assert.equal((await intent(guestPage, 'room.addBot')).code, 'AI_LIMIT');
     await idleCards(guestPage);
     await guestPage.mouse.move(1916, 4);
@@ -221,7 +231,10 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
     // Persisted policy is server-private; HTTP clients cannot read its path or operator command.
     assert.equal((await fetch(`${server.url}/runtime/server-settings.json`)).status, 404);
     assert.equal((await fetch(`${server.url}/tools/server-settings.mjs`)).status, 404);
-    assert.deepEqual(JSON.parse(await fs.readFile(path.join(settingsDir, 'server-settings.json'), 'utf8')), { version: 1, maxAiPerRoom: null });
+    // the settings file keeps the owner's AI limit (the upstream v0.3.3 settings file carries its own fields too)
+    const written = JSON.parse(await fs.readFile(path.join(settingsDir, 'server-settings.json'), 'utf8'));
+    assert.equal(written.version, 1);
+    assert.equal(written.maxAiPerRoom, null);
     assert.deepEqual(errors, []);
   } finally {
     if (browser) { await browser.close(); report.cleanup.browserClosed = true; }

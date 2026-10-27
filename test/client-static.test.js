@@ -1124,7 +1124,9 @@ describe('screen helpers', () => {
     };
     assert.equal(normalizeSeats(room).length, 4);
     assert.equal(normalizeSeats({ mode: 'solo', seats: [room.seats[0], null, null, null] }).length, 1);
-    assert.deepEqual(normalizeSeats({ mode: 'coop', seats: 'bad' }), new Array(8).fill(null));
+    // a room without seats falls back to the default seat count (D034: the upstream four-player room), not to a literal
+    const { DEFAULT_SEATS } = await import(pathToFileURL(path.join(ROOT, 'shared/constants.js')).href);
+    assert.deepEqual(normalizeSeats({ mode: 'coop', seats: 'bad' }), new Array(DEFAULT_SEATS).fill(null));
     let f = roomFacts(room, 'h');
     assert.equal(f.isHost, true);
     assert.equal(f.canStart, false, 'guest not ready');

@@ -348,31 +348,20 @@ export function seatCardView({ seat, index, room, facts, myId, busy, onAddBot, o
       <span class="rseat__who"><b class="seat__name">${botPrefix ? html`<span class="seat__name-pre">${botPrefix[0]}</span>${botPrefix[1]}` : seat.name || t('博士')}</b>${isMe ? html`<span class="seat__you" aria-hidden="true">${t('你')}</span>` : null}</span>
       <small class="rseat__doc">${seat.isBot ? 'AUTONOMOUS UNIT' : `DOCTOR #${doctorNo(seat.playerId)}`}</small>
     </div>
-    <${MicroLabel}>${seat.isBot ? 'AUTONOMOUS UNIT' : `DOCTOR #${doctorNo(seat.playerId)}`}<//>
     ${facts.modded && !seat.isBot ? html`<span class=${`seat__content is-${seat.content || 'loading'}`} data-testid="seat-content">
       ${seat.content === 'ready' ? t('插件内容就绪') : seat.content === 'failed' ? t('插件内容校验失败') : t('插件内容载入中')}
     </span>` : null}
-    <footer class="seat__foot">
-      <span class=${`seat__state seat__state--${state}`}>
-        ${state === 'ready' ? html`<${Icon} name="check" />${t('已就绪')}`
-          : state === 'offline' ? html`<${Icon} name="wifiOff" />${t('连接中断')}`
-          : state === 'host' ? html`<${Icon} name="crown" />${t('待命中')}`
-          : html`<${Icon} name="hourglass" />${t('准备中')}`}
-      </span>
-      ${facts.isHost && (seat.isBot || !isMe) ? html`<div class="seat__actions">
-        ${!seat.isBot && !offline && facts.transferableHumans.some((s) => s.playerId === seat.playerId) ? html`<${Tooltip} text=${t('转让房主给该博士')}>
+    ${facts.isHost && !seat.isBot && !isMe && !offline && facts.transferableHumans.some((s) => s.playerId === seat.playerId)
+      // The host's 转让房主 button: upstream v0.3.3 has no such action (the branch's own room.transferHost), so it is the
+      // one thing the seat foot keeps. The upstream card already shows the seat's state (inside the art) and the host's
+      // 移出 button (the card's corner badge), so the foot repeats neither of them.
+      ? html`<footer class="seat__foot"><div class="seat__actions">
+        <${Tooltip} text=${t('转让房主给该博士')}>
           <${Button} variant="secondary" size="sm" square=${true} icon="crown" loading=${busy === `transfer${index}`}
             disabled=${!!busy} onClick=${() => onTransferHost(index, seat.name, seat.playerId)} aria-label=${t('转让房主给该博士')} />
-        <//>` : null}
-        ${seat.isBot ? html`<${Tooltip} text=${t('移除该 AI 队友')}>
-          <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `rm${index}`} disabled=${!!busy}
-            onClick=${() => onRemoveBot(index, seat.playerId)} aria-label=${t('移除 AI 队友')} />
-        <//>` : html`<${Tooltip} text=${t('将该博士移出同盟')}>
-          <${Button} variant="ghost" size="sm" square=${true} icon="close" loading=${busy === `kick${index}`} disabled=${!!busy}
-            onClick=${() => onKick(index, seat.name, seat.playerId)} aria-label=${t('移出该博士')} />
-        <//>`}
-      </div>` : null}
-    </footer>
+        <//>
+      </div></footer>`
+      : null}
   </article>`;
 }
 
@@ -417,12 +406,21 @@ function CapacityPicker({ room, facts, busy, onPick }) {
         onClick=${() => n !== capacity && onPick(n)}>${n}</button>`)}
     </div>` : html`<span class="t-dim">${t('由房主设置')}</span>`}
     <span class="room-capacity__count num">${facts.occupied.length} / ${capacity}</span>
-    ${facts.maxAiPerRoom !== null ? html`<span class=${`room-ai-limit${facts.aiLimitReached ? ' is-full' : ''}`} role="status"
-        title=${facts.aiLimitReached ? t('已达到服务器允许的 AI 队友上限') : t('服主设置的每房 AI 队友上限')}>
-      <${Icon} name="robot" />${t('AI 队友 {used} / {limit}', { used: facts.botCount, limit: facts.maxAiPerRoom })}
-      ${facts.aiLimitReached ? html`<span>${t('已达上限')}</span>` : null}
-    </span>` : null}
   </div>`;
+}
+
+/**
+ * The server's per-room AI teammate limit (the owner's setting): a status badge beside the room's clock. It was part of
+ * the capacity bar before the v0.3.3 merge; the bar itself is now the settings panel's seat picker, so the badge — a
+ * status, not a setting — lives in the top bar where it stays visible.
+ */
+function AiLimitBadge({ facts }) {
+  if (facts.maxAiPerRoom === null) return null;
+  return html`<span class=${`room-ai-limit${facts.aiLimitReached ? ' is-full' : ''}`} role="status"
+      title=${facts.aiLimitReached ? t('已达到服务器允许的 AI 队友上限') : t('服主设置的每房 AI 队友上限')}>
+    <${Icon} name="robot" />${t('AI 队友 {used} / {limit}', { used: facts.botCount, limit: facts.maxAiPerRoom })}
+    ${facts.aiLimitReached ? html`<span>${t('已达上限')}</span>` : null}
+  </span>`;
 }
 
 /** D004 is a fixed co-op rule, including managed and disconnected human seats after manual humans. */
@@ -457,7 +455,7 @@ function AiTakeoverToggle({ option, busy, onToggle }) {
  * ⚙ of the bottom pill (co-op): 同盟设置 — the 模拟难度 (opens 选择模拟协议: the host's 确认, the others' read-only view)
  * and the 「AI 队友最后选择」 switch. Closes on a click outside it or Esc.
  */
-function RoomOptions({ option, takeoverOption, onAiTakeover, soloOption = null, room, isHost, busy, onSoloUnlimited, onDifficulty, onClose, version = null }) {
+function RoomOptions({ option, takeoverOption, onAiTakeover, soloOption = null, room, isHost, busy, onSoloUnlimited, onDifficulty, onClose, version = null, capacity = null }) {
   const info = difficultyInfo(room.mode, room.difficulty);
   const title = soloOption ? t('模拟设置') : t('同盟设置');
   useEffect(() => {
@@ -488,6 +486,7 @@ function RoomOptions({ option, takeoverOption, onAiTakeover, soloOption = null, 
       <//>
       ${version.editable ? null : html`<span class="t-dim">${t('由创建者发起')}</span>`}
     </div>` : null}
+    ${capacity}
     <${AiTakeoverToggle} option=${takeoverOption} busy=${busy} onToggle=${onAiTakeover} />
     ${soloOption
       ? html`<${SoloUnlimitedToggle} option=${soloOption} busy=${busy} onToggle=${onSoloUnlimited} />`
@@ -617,6 +616,9 @@ export function RoomScreen() {
   });
   const setDifficulty = (difficulty) => run('diff', () => net.request('room.setDifficulty', { difficulty }));
   const setAiTakeover = (on) => run('aihandover', () => net.request('room.setAiTakeover', { on }));
+  // the room's seat count (the branch's capacity layer): the host may raise or lower it before the match starts.
+  // The server refuses a shrink that would drop an occupied seat, and the picker greys those out.
+  const setCapacity = (capacity) => run('capacity', () => net.request('room.setCapacity', { capacity }));
   // the room is the authority; the lobby card reads the same pref the next time this browser creates a solo room
   const setSoloUnlimited = async (on) => {
     const sent = await run('solofree', () => net.request('room.setSoloUnlimited', { on }));
@@ -747,7 +749,13 @@ export function RoomScreen() {
     if (sent && alive.current) setVersionOpen(false);
   };
 
-  return html`<div class=${`screen room-screen rs${coop ? '' : ' rs--solo'}`} style=${`--d-color:${DIFFICULTY_COLORS[room.difficulty] || 'var(--amber)'}; --n:${facts.seats.length}`}>
+// The seat row's shape (the branch's capacity layer, D034): upstream's row is one line of four cards whose width is
+  // a share of the screen — a four-player room's parameter. A big room squeezes twenty cards into 58 px each (the name
+  // plate then breaks into a column of single characters), so it lays them out in a grid of rows instead: the columns
+  // follow the seat count (the rows follow from them), and the narrow screens override the column count in room.css.
+  const seatCols = coop ? Math.min(10, Math.max(4, Math.ceil(facts.seats.length / 2))) : 4;
+
+  return html`<div class=${`screen room-screen rs${coop ? '' : ' rs--solo'}`} style=${`--d-color:${DIFFICULTY_COLORS[room.difficulty] || 'var(--amber)'}; --n:${facts.seats.length}; --cols:${seatCols}`}>
     <div class="rs__bg" aria-hidden="true"></div>
     <header class="topbar rs-top">
       <div class="topbar__left rs-top__left">
@@ -759,6 +767,7 @@ export function RoomScreen() {
             ${pluginMode ? html`<span class="rs-clock__sep"></span><span class="room-mode" data-testid="room-mode">${pluginMode}</span>` : null}</b>
           <span class="rs-clock__ping">${t('当前延迟')}<${PingPill} ms=${conn.ping} online=${online} /></span>
         </div>
+        <${AiLimitBadge} facts=${facts} />
         <div class="rs-tools">
           <${Button} variant="secondary" size="sm" square=${true} icon="chart" class="stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')} />
           <${SettingsButton} class="room-settings" variant="secondary" square=${true} />
@@ -781,7 +790,7 @@ export function RoomScreen() {
       </div>
     </header>
 
-    <main class=${`seats rs-seats${coop ? '' : ' seats--solo'}`}>
+    <main class=${`seats rs-seats${coop ? '' : ' seats--solo'}${coop && facts.seats.length > 4 ? ' rs-seats--grid' : ''}`}>
       ${facts.seats.map((s, i) => {
         const op = seatOperator(s, cards, { myId: me.playerId, myCard });
         // the player's outfit for that operator (header "Outfits"); null = the default art
@@ -819,7 +828,8 @@ export function RoomScreen() {
           ${aiLast || soloOpt ? html`<button type="button" class=${`rs-pill__gear${opts ? ' is-on' : ''}`} onClick=${() => setOpts((v) => !v)} title=${aiLast ? t('同盟设置') : t('模拟设置')} aria-label=${aiLast ? t('同盟设置') : t('模拟设置')}
             aria-expanded=${opts ? 'true' : 'false'}><${GearGlyph} /></button>` : null}
           ${opts && (aiLast || soloOpt) ? html`<${RoomOptions} takeoverOption=${aiTakeoverOption(room, me.playerId)} onAiTakeover=${setAiTakeover} option=${aiLast} soloOption=${soloOpt} room=${room} isHost=${facts.isHost} busy=${busy}
-            onSoloUnlimited=${setSoloUnlimited} onDifficulty=${openProto} onClose=${() => setOpts(false)} version=${versionCtl} />` : null}
+            onSoloUnlimited=${setSoloUnlimited} onDifficulty=${openProto} onClose=${() => setOpts(false)} version=${versionCtl}
+            capacity=${coop ? html`<${CapacityPicker} room=${room} facts=${facts} busy=${busy} onPick=${setCapacity} />` : null} />` : null}
         </div>
       </div>
       <div class="room-bar__right rs-foot__right">

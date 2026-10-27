@@ -906,6 +906,20 @@ button.ally-card:disabled { cursor: default; }
 button.ally-card:disabled .ally-card__bar { filter: grayscale(.5) brightness(.8); }
 /* the test-room box under 创建同盟 (test mode only) */
 .ally-test { padding: 0 .2rem; }
+/* the seat count of the room to create (the branch's capacity layer): four by default, up to twenty. It sits above the
+   创建同盟 card, in the same column, so the choice is read before the room exists. */
+.ally-capacity { display: flex; flex-direction: column; gap: .05rem; padding: 0 .2rem; }
+.ally-capacity__label { display: flex; flex-direction: column; color: var(--text-md); font-size: calc(.19 * var(--t)); font-weight: 700; }
+.ally-capacity__options { display: flex; flex-wrap: wrap; gap: .06rem; }
+.ally-capacity__opt {
+  min-width: max(.66rem, 32px, calc(66px * var(--sp-ui, 1)));
+  height: max(.4rem, 32px, calc(40px * var(--sp-ui, 1)));
+  padding: 0 .12rem;
+  font: inherit; font-size: calc(.16 * var(--t)); font-weight: 700;
+  color: var(--text-lo); background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2);
+}
+.ally-capacity__opt:hover { color: var(--text-hi); border-color: var(--mint-600); }
+.ally-capacity__opt.is-active { color: var(--mint-400); border-color: var(--mint-500); background: var(--mint-a20); }
 .ally-card__bar--join { width: 100%; color: #2a1404; background: linear-gradient(180deg, #ffb24f, #f08a26); }
 .ally-card__bar--join:disabled { filter: grayscale(.6) brightness(.75); cursor: default; }
 .ally-card__bar--join:hover:not(:disabled), .ally-card__bar--join:focus-visible { filter: brightness(1.06); }
@@ -1208,10 +1222,14 @@ button.ally-card:disabled .ally-card__bar { filter: grayscale(.5) brightness(.8)
 .lobby-discovery__stats > span { display: flex; flex-direction: column; align-items: center; min-width: .44rem; border-left: 1px solid var(--line-2); padding-left: .12rem; }
 .lobby-discovery__stats b { color: var(--mint-400); font-size: calc(.23 * var(--t)); line-height: 1; }
 .lobby-discovery__stats small { margin-top: .04rem; color: var(--text-lo); font-size: calc(.13 * var(--t)); white-space: nowrap; }
-.lobby-discovery__actions { display: flex; align-items: center; gap: .08rem; margin-top: .12rem; }
+/* The three controls do not fit on one line in the 4rem side column (the upstream hub layout): the two
+   buttons share the first line and the 房间偏好 select takes a line of its own — no overlap, and the
+   label never collapses into a vertical column of single characters. */
+.lobby-discovery__actions { display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; gap: .08rem; margin-top: .12rem; }
 .lobby-discovery__actions .btn { flex: none; }
-.lobby-discovery__preference { display: inline-flex; align-items: center; gap: .05rem; min-width: 0; height: .42rem; padding: 0 .06rem 0 .1rem; border: 1px solid var(--line-2); background: rgba(0, 0, 0, .24); color: var(--text-lo); font-size: calc(.13 * var(--t)); }
-.lobby-discovery__preference select { min-width: 1.15rem; height: .34rem; padding: 0 .08rem; border: 0; background: var(--bg-2); color: var(--text-hi); font-size: calc(.15 * var(--t)); }
+.lobby-discovery__preference { display: inline-flex; align-items: center; gap: .05rem; grid-row: 2; grid-column: 1 / -1; min-width: 0; height: .42rem; padding: 0 .06rem 0 .1rem; border: 1px solid var(--line-2); background: rgba(0, 0, 0, .24); color: var(--text-lo); font-size: calc(.13 * var(--t)); }
+.lobby-discovery__preference > span { flex: none; white-space: nowrap; }
+.lobby-discovery__preference select { flex: 1 1 auto; min-width: 0; max-width: 100%; height: .34rem; padding: 0 .08rem; border: 0; background: var(--bg-2); color: var(--text-hi); font-size: calc(.15 * var(--t)); }
 .lobby-directory { background: #101713; }
 .lobby-directory .modal__body { padding: .12rem .18rem .08rem; }
 .lobby-directory__note { display: flex; align-items: center; justify-content: space-between; margin-bottom: .08rem; color: var(--text-lo); font-size: calc(.13 * var(--t)); }
@@ -1244,5 +1262,4 @@ button.ally-card:disabled .ally-card__bar { filter: grayscale(.5) brightness(.8)
 @media (max-width: 560px) {
   .lobby-discovery__stats { gap: .05rem; }
   .lobby-discovery__actions { flex-wrap: wrap; }
-  .lobby-discovery__preference { flex: 1 1 1.8rem; }
 }

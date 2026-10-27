@@ -37,7 +37,7 @@
 import { TestMark } from '../ui/testConsole.js';
 import { ResumeMatchButton } from '../ui/resumeMatch.js';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, ROOM_CAPACITIES, modeIdFor, ERR } from '../../../shared/constants.js';
+import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, ROOM_CAPACITIES, DEFAULT_SEATS, modeIdFor, ERR } from '../../../shared/constants.js';
 import { html, confirmDialog, Button, Icon, MicroLabel, Modal, PingPill, Spinner, DifficultyIcon, TextField } from '../ui/components.js';
 import { Sprite, Img } from '../ui/gameComponents.js';
 import { uiUrl } from '../ui/assetUrls.js';
@@ -602,7 +602,7 @@ export function ProtocolSelect({ roomMode, difficulty, onDifficulty, onClose, on
  * in a 1024 px window — it ended in an ellipsis there).
  */
 export function AllianceSelect({ onClose, onCreate, difficulty = 'FUNNY', code, onCode, codeOk, online, busy, onJoin, onSpectate, recent, marks, focusKey,
-  testMode = false, asTest = false, onTest = () => {}, short = false }) {
+  testMode = false, asTest = false, onTest = () => {}, short = false, capacity = DEFAULT_SEATS, onCapacity = () => {} }) {
   const diffName = DIFFICULTY_NAMES[difficulty] ? t(DIFFICULTY_NAMES[difficulty]) : '';
   return html`<${Modal} open=${true} onClose=${onClose} class="ally" veilClass="proto-veil">
     <div class="ally__body">
@@ -620,6 +620,13 @@ export function AllianceSelect({ onClose, onCreate, difficulty = 'FUNNY', code, 
           <button type="button" class="ally-guide" onClick=${() => openGuide(0)}><span class="ally-guide__icon"><${Icon} name="book" /></span>${t('玩法说明')}</button>
         </section>
         <section class="ally-side">
+          <div class="ally-capacity" data-testid="alliance-capacity">
+            <span class="ally-capacity__label">${t('同盟席位')} <${MicroLabel}>ROOM CAPACITY<//></span>
+            <div class="ally-capacity__options" role="radiogroup" aria-label=${t('同盟席位')}>
+              ${ROOM_CAPACITIES.map((n) => html`<button key=${n} type="button" role="radio" aria-checked=${capacity === n ? 'true' : 'false'}
+                class=${`ally-capacity__opt${capacity === n ? ' is-active' : ''}`} onClick=${() => onCapacity(n)}>${t('{n} 人', { n })}</button>`)}
+            </div>
+          </div>
           <button type="button" class="ally-card ally-card--create ally-create" data-testid="alliance-create" data-difficulty=${difficulty}
               disabled=${!online || busy === 'create'} aria-busy=${busy === 'create' ? 'true' : 'false'} onClick=${() => onCreate()}>
             <span class="ally-card__art"><${CreateArt} /></span>
@@ -683,6 +690,12 @@ export function LobbyScreen() {
     const saved = loadPref('lobby.matchCapacity', null);
     return ROOM_CAPACITIES.includes(saved) ? saved : null;
   });
+  // the co-op room's seat count (the branch's capacity layer): four by default (the upstream room), raised by the host
+  // to 8 / 10 / 16 / 20 before the match starts. The room remembers it for the next creation.
+  const [capacity, setCapacity] = useState(() => {
+    const saved = loadPref('lobby.capacity', DEFAULT_SEATS);
+    return ROOM_CAPACITIES.includes(saved) ? saved : DEFAULT_SEATS;
+  });
   const [recent] = useState(recentRooms);
   const marks = loadPref('recentTestRooms', []);
   const [sweepOpen, setSweepOpen] = useState(false);
@@ -717,6 +730,8 @@ export function LobbyScreen() {
   const openMode = (m) => { if (m === 'solo') setSoloOpen(true); else setAllyOpen(true); };
   const pickDifficulty = (d) => { setDifficulty(d); savePref('lobby.difficulty', d); };
   const setSoloFreePref = (on) => { const next = on === true; setSoloFree(next); savePref('lobby.soloUnlimited', next); };
+  // the seat count picked on 选择同盟方式 (the branch's capacity layer): remembered for the next room
+  const pickCapacity = (n) => { setCapacity(n); savePref('lobby.capacity', n); };
 
   const run = async (kind, fn) => {
     if (inFlight.current) return;
@@ -730,8 +745,11 @@ export function LobbyScreen() {
   };
   // 独立模拟: at the difficulty picked on 选择模拟协议; 创建同盟: at the remembered one, changed in the room by the host
   // (`version`: the lobby's, only when welcome.versions is present — protocol §4; omitted when the server offers 第二期下半 alone)
+  // `capacity`: the co-op room's seat count (the branch's capacity layer) — four by default, up to twenty; a solo room
+  // is always one seat, so the field is left out there.
   const create = (mode) => run('create', () => net.request('room.create', {
     mode, difficulty: mode === 'solo' ? shownSolo : shownCoop, ...(testMode && asTest ? { test: true } : {}), ...(versions ? { version } : {}),
+    ...(mode === 'solo' ? {} : { capacity }),
     ...(mode === 'solo' && soloFree && soloTimed === true ? { soloUnlimited: true } : {}),
   }));
   const quickMatch = () => run('quickMatch', () => net.request('lobby.quickMatch', matchCapacity ? { capacity: matchCapacity } : {}).catch((err) => {
@@ -825,7 +843,8 @@ export function LobbyScreen() {
     ${allyOpen ? html`<${AllianceSelect} onClose=${() => setAllyOpen(false)} onCreate=${() => create('coop')} difficulty=${shownCoop}
       code=${code} onCode=${(v) => setCode(normalizeCode(v))} codeOk=${codeOk} online=${online} busy=${busy}
       onJoin=${join} onSpectate=${spectate} recent=${recent} marks=${marks} focusKey=${!coarse}
-      testMode=${testMode} asTest=${asTest} onTest=${setAsTest} short=${shortScreen} />` : null}
+      testMode=${testMode} asTest=${asTest} onTest=${setAsTest} short=${shortScreen}
+      capacity=${capacity} onCapacity=${pickCapacity} />` : null}
     ${soloOpen ? html`<${ProtocolSelect} roomMode="solo" difficulty=${shownSolo} onDifficulty=${pickDifficulty}
       onClose=${() => setSoloOpen(false)} onCreate=${() => create('solo')} busy=${busy} online=${online}
       testMode=${testMode} asTest=${asTest} onTest=${setAsTest} difficulties=${solo} loading=${versionLoading} failed=${versionFailed}

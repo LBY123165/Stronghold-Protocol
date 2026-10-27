@@ -21,7 +21,11 @@ export const PLUGIN_API = Object.freeze({ current: 2, min: 1 });
 /** Four players remain the baseline for card-pool groups and hidden-core layers. Capacity includes humans and AI. */
 export const BASE_SEATS = 4;
 export const MAX_SEATS = 20;
-export const DEFAULT_SEATS = 8;
+/**
+ * The seat count a room gets when the creator does not pick one: the upstream four-player room (D034).
+ * The host can still raise it to 8 / 10 / 16 / 20 before the match starts.
+ */
+export const DEFAULT_SEATS = BASE_SEATS;
 export const ROOM_CAPACITIES = Object.freeze([4, 8, 10, 16, 20]);
 /** One independent 机变 page per fixed group; card indexes are local to its six positions. */
 export const MAX_DRAFT_CARDS = 6;
