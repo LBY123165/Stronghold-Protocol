@@ -621,7 +621,10 @@ test('test join and watch require acknowledgement before any seat or private sta
     error(lobby[method](s, { code }), 'TEST_CONFIRM');
     assert.equal(lobby.roomOf(s), null); assert.equal(s.messages.length, 0);
     ok(lobby[method](s, { code, testAck: true }));
-    assert.equal(s.messages.at(-1).test, true);
+    // the room.state carries the test flag; the waiting-room chat may follow it (m.chatState)
+    const state = s.messages.find((m) => m.t === 'room.state');
+    assert.ok(state, 'the room state arrived');
+    assert.equal(state.test, true);
   }
   for (const type of ['room.join', 'room.spectate']) {
     assert.equal(validateC2S({ t: type, code }), null);

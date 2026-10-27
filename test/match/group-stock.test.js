@@ -33,9 +33,12 @@ test('Mimic overdraw stays in the receiving fixed group, with public supply clam
     assert.deepEqual(b.pool.snapshot(), other);
     const ctx = makeCtx(m, a, { key: 'test' }, 'onTest');
     assert.equal(ctx.rollChess({ filter: x => x === id }), null);
-    // 0.3.1 does not pass `ignoreCounts` on to the pool roll (server/match/effectsMeta.js), so a sample never sees the
-    // over-drawn piece: the group stock stays the only source.
-    assert.equal(ctx.rollChess({ filter: x => x === id, ignoreCounts: true }), null);
+    // A plain draw never sees the over-drawn piece: the group stock stays the only source.
+    assert.equal(ctx.rollChess({ filter: x => x === id }), null);
+    // `ignoreCounts` asks for an identity draw that ignores the remaining stock — the official 拟态物质 (the third
+    // copy, or with fewer than two owned a same-bond operator) samples an eligible identity even when the pool is
+    // empty (server/match/builtinMeta.js use_equip_reward_char_chess, upstream 0.3.3).
+    assert.equal(ctx.rollChess({ filter: x => x === id, ignoreCounts: true }), id);
     checkInvariants(m);
     const elite = a.allChess().find(p => m.gd.baseIdOf(p.id) === id && m.gd.isGolden(p.id));
     assert.ok(a.sell(elite.uid).ok);

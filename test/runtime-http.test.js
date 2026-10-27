@@ -93,7 +93,9 @@ test('HTML pins every runtime subtree and relative ESM dependency, while keeping
   assert.equal((await request(server, '/asset-cache-sw.js')).headers['cache-control'], 'no-cache');
   assert.equal((await request(server, '/js/asset-cache-worker.js')).headers['cache-control'], 'no-cache');
   assert.equal((await request(server, '/assets/art.svg')).headers['cache-control'], 'public, max-age=86400');
-  assert.equal((await request(server, '/data/config.json?v=unverified')).headers['cache-control'], 'no-cache');
+  // a `?v=` query is a version pin (server/http/files.js cacheControlFor): the URL names one exact body and may be
+  // cached for good, whether or not the pin itself verifies (server/http/static.js answers an unverifiable one).
+  assert.equal((await request(server, '/data/config.json?v=unverified')).headers['cache-control'], 'public, max-age=31536000, immutable');
 });
 
 test('Brotli/gzip/identity use distinct validators; HEAD, 304 and byte ranges retain exact response semantics', async (t) => {

@@ -68,7 +68,10 @@ export class MatchMessaging {
 
   /** @param {string|{ msgid: string, params?: object }} text a string or msg() (shared/i18n.js) */
   toast(ps, kind, text) {
-    if (!ps || ps.isBot || ps.left || !this.canReceive(ps)) return;
+    // A seat that cannot be reached is skipped. `canReceive` is the takeover-aware check; a match object built
+    // without it (the messaging unit tests call the prototype method on a stub) falls back to the plain check.
+    const reachable = typeof this.canReceive === 'function' ? this.canReceive(ps) : !!(ps && ps.connected);
+    if (!ps || ps.isBot || ps.left || !reachable) return;
     this.sendTo(ps.playerId, { t: 'm.toast', kind, ...wireMessage(text) });
   }
 

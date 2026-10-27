@@ -940,20 +940,9 @@ export class Network {
   /** Ping every socket; terminate the ones that did not answer since the previous heartbeat. */
   heartbeat() {
     // A closed server has no connection left to keep alive, and a shutting-down one must not be walked: nothing to do.
+    // The pass yields between chunks, so a large connection set cannot hold the event loop for the whole sweep.
+    // A pass still yielding when the next tick fires is skipped rather than started a second time on top of itself.
     if (this.closed || this._heartbeatPending) return;
-    const now = this.now();
-    // Few connections: one synchronous sweep, so a caller sees the effect immediately (the old behaviour).
-    // Many: chunk the pass with a yield between chunks, so a large connection set cannot hold the event loop for
-    // the whole sweep. A pass still yielding when the next tick fires is skipped rather than started twice.
-    const conns = [...this.conns.entries()];
-    if (conns.length <= 128) {
-      for (const [key, conn] of conns) {
-        if (this.closed) return;
-        if (this.conns.get(key) !== conn) continue;
-        this._heartbeatConn(conn, now);
-      }
-      return;
-    }
     this._heartbeatPending = true;
     this._heartbeatPass()
       .catch((e) => this.log.debug?.('[net] heartbeat error', e?.message))
@@ -992,7 +981,9 @@ export class Network {
         return;
       }
       // 带宽紧急保护期间：不因未应答而断开（保护会冻结对局），并保留最早未应答的 ping 作为恢复证据。
-      if (!conn.alive && !(this.emergency.active && conn.session && this.handler.allowEmergencyResume?.(conn.session))) {
+      // this.emergency 在没有经过构造函数的对象上（如直接用 Network.prototype 的单元测试）可能不存在。
+      const emergency = this.emergency?.active === true;
+      if (!conn.alive && !(emergency && conn.session && this.handler.allowEmergencyResume?.(conn.session))) {
         conn.ws.terminate(); return;
       }
       conn.alive = false;

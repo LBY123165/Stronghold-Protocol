@@ -77,6 +77,8 @@ function normaliseState(state, welcome) {
   const out = walk(state);
   out.code = '<code>';
   for (const s of out.seats || []) if (s && s.playerId === '<player>' && typeof s.name === 'string') s.name = '<name>';
+  // The waiting-room chat's id is random per room (server/matchChat.js), like the room code.
+  if (typeof out.lobbyChatId === 'string') out.lobbyChatId = '<lobby chat>';
   if (out.content && typeof out.content.cs === 'string') {
     assert.equal(out.content.cs, welcome.content?.vanilla, 'room content cs = the vanilla cs');
     out.content.cs = '<vanilla cs>';
