@@ -4,11 +4,12 @@
 
 ## D001
 
-**生效：房间硬上限 20，默认 8，按实际参战人数适配。**
+**生效：房间硬上限 20，按实际参战人数适配。默认席位见 [D034](#d034)。**
 
 - 房间可选 4 / 8 / 10 / 16 / 20；空位、观战者不作为参战玩家。独立模拟保持单人。
 - 原因：先实现至少 8 人，并保留 10、16、20 人的扩展能力；不能因开了大房而让少量玩家承担满房内容。
 - 依据：[容量记录](records/2026-10-06-01-player-capacity.md)，`e32edbb`、`309c7a1`；当前规则见 [PLAYER_CAPACITY.md](../PLAYER_CAPACITY.md)。
+- 默认席位：原为 8，2026-10-27 用户要求「默认应该是四人」并保留切到 20 的能力，由 [D034](#d034) 替代；可选档位与硬上限不变。
 
 ## D002
 
@@ -359,3 +360,24 @@
 - 实测（同一套 `test/wire-pressure.test.js` 场景，84 连接 / 4 房 / 共享 0.8 Mbps）：13 位时线上 3,215,180 B、峰值代理队列 2.7 MB、40 个合成帧只送达 5–11 个，压测超时；只把窗口改回 15 位即回到 626,650 B、队列 290 KB、送达 29–38 个，压测通过。两版发送的帧数与解压后字节完全相同（3276 帧 / 64,668,240 B），差异只在压缩率。
 - 因此 `WS_DEFLATE` 取：服务端 15 位窗口、保留服务端上下文（`clientNoContextTakeover: true` 使入站不保留上下文）、`threshold: 1024`、zlib level 6 / memLevel 7、全局压缩并发上限 4。服务端 `serverNoContextTakeover` 不显式写 `false`——ws 在该值为 `false` 时会拒绝一切带 `server_no_context_takeover` 的客户端提议（握手 400），而上游的压缩用例要求这类客户端能连上。
 - 依据：[上游合并记录](records/2026-10-27-01-upstream-v0.3.3-merge.md)；入口 `server/http/websocket.js`，测试 `test/ws-compression.test.js`、`test/wire-pressure.test.js`。
+
+## D034
+
+**生效：房间默认席位回到 4 人（上游四人局），可选 4 / 8 / 10 / 16 / 20 与硬上限 20 不变。**
+
+- 2026-10-27 用户在升级到上游 v0.3.3 后指出：「创建多人游戏的那个界面也有问题，默认应该是四人，然后最高二十人应该和以前一样可以切」。默认席位因此由 8 改为 4（`BASE_SEATS`），`DEFAULT_SEATS` 随之改为 `BASE_SEATS`。
+- 这只改**默认值**，不改档位：`ROOM_CAPACITIES = [4, 8, 10, 16, 20]` 与 `MAX_SEATS = 20` 均不变。四人局的内容生成、分组卡池与领袖血量按 4 人基线（`BASE_SEATS`）标定，默认 4 人使这些标定回到它成立的前提。
+- 实现：`shared/constants.js` 的 `DEFAULT_SEATS`；大厅「选择同盟方式」里的席位选择器（默认 4，记 `lobby.capacity`）随 `room.create` 的 `capacity` 字段下发；房间内「同盟设置」里的席位选择器走 `room.setCapacity`。
+- 替代：[D001](#d001) 的「默认 8」；D001 的可选档位与硬上限继续生效。
+- 依据：[上游合并记录](records/2026-10-27-01-upstream-v0.3.3-merge.md)；入口 `shared/constants.js`、`public/js/screens/lobby.js`、`public/js/screens/room.js`。
+
+## D035
+
+**生效：局内聊天层在模态框期间退让——上游的独占弹窗（含「协议已失效」）拥有整个屏幕。**
+
+- 合并上游 v0.3.3 后发现层级冲突：上游的「协议已失效」弹窗（`public/js/ui/downedPlate.js`，与上游逐字一致）渲染在游戏界面**自己的层叠上下文**内（`.screen`，`z-index: 1`），它的遮罩只覆盖该界面内的元素；分支的局内聊天层挂在 app 根上（`position: fixed; z-index: 75`），于是**浮在弹窗之上仍可点击**——弹窗变成了「非独占」。
+- 反向的问题是同一层的另一个入口：角标里的 `.gm__chat` 在界面内部，被上游遮罩正确挡住。两者行为不一致才是缺陷所在。
+- 处理：沿用上游自己的标记 `html.sp-modal-open`（上游 `theme.css` 用它隐藏竖屏提示，`components.js` 的 Modal 在独占期间挂上、关闭后摘除），让局内聊天层在该标记存在时隐藏：`.mchat-away-entry` 与对局聊天面板 `.mchat-panel`（不含大厅的 `.mchat-panel--lobby`，后者本就在自己的界面内、天然低于该界面的弹窗）。
+- 这不改上游任何文件：`downedPlate.js` 与上游副本完全一致，弹窗的触发条件、遮罩与按钮行为都保持上游语义。
+- 依据：同口径对照——`public/js/ui/downedPlate.js` 与 `Stronghold-Protocol-master/public/js/ui/downedPlate.js` 逐字相同；层级由浏览器实测（弹窗遮罩命中 `DIV.modal downm-veil`、根层入口命中自身）。
+- 入口：`public/css/match-chat.css`；回归 `test/match-chat.browser.test.js`（淘汰 + 托管场景）。

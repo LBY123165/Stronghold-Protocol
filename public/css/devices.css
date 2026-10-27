@@ -125,13 +125,16 @@ html:not(.sp-in-match) .toast-host { margin-top: var(--sa-t); }
    The bottom copies the 交流 / ⚙ size floors exactly, their 32 px minimum included, or at 界面大小 ≤ 90 % it ends below
    the ⚙ row (DESIGN §35.43; test/ui/ui-size.test.js checks such mirrors). */
 @media (max-width: 767px) {
-  .gm__corner { flex-wrap: wrap-reverse; align-content: flex-start; width: max(32px, calc(72px * var(--sp-ui, 1)), calc(3 * .56rem + .2rem)); }
+  /* The branch's independent chat entry is the corner's fourth control (the upstream v0.3.3 corner has three: the
+     AI-participation button, the emote wheel and the gear), and it is wider than the others (its label is a word).
+     The corner's wrapped width therefore counts four controls, the chat one at its own width. */
+  .gm.has-chat .gm__corner { width: max(32px, calc(72px * var(--sp-ui, 1)), calc(3 * .56rem + 1.51rem + .3rem)); }
   .dpanel:not(.dpanel--right) { bottom: calc(.44rem + max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) * 55 / 151 + .56rem); }
 }
 @media (max-width: 767px) and (pointer: coarse), (max-width: 767px) and (any-pointer: coarse) {
-  .gm__corner { width: max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + .2rem)); }
+  .gm.has-chat .gm__corner { width: max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + 1.51rem + .3rem)); }
   /* the 机变 overlay starts right of that corner (§35.51: at 2.8rem, 112 px on a 667 px phone, it covered 8 px of ⛶) */
-  .gm.has-sp > .spov { left: calc(max(2.8rem, .24rem + max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + .2rem)) + 2px) + var(--sa-l)); }
+  .gm.has-sp > .spov { left: calc(max(2.8rem, .24rem + max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + 1.51rem + .3rem)) + 2px) + var(--sa-l)); }
   .dpanel:not(.dpanel--right) { bottom: calc(.44rem + max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) * 55 / 151 + max(.56rem, 32px, calc(34px * var(--sp-ui, 1)))); }
 }
 /* With the shop folded (收起) no bar covers the corner: one row again, so the folded shop's prep camera, which keeps the
@@ -142,9 +145,11 @@ html:not(.sp-in-match) .toast-host { margin-top: var(--sa-t); }
 /* … but not under the 机变 overlay, which starts at the corner's wrapped width (§35.51) */
 @media (max-width: 767px) {
   .gm.is-collapsed.has-sp .gm__corner { flex-wrap: wrap-reverse; width: max(32px, calc(72px * var(--sp-ui, 1)), calc(3 * .56rem + .2rem)); }
+  .gm.is-collapsed.has-sp.has-chat .gm__corner { width: max(32px, calc(72px * var(--sp-ui, 1)), calc(3 * .56rem + 1.51rem + .3rem)); }
 }
 @media (max-width: 767px) and (pointer: coarse), (max-width: 767px) and (any-pointer: coarse) {
   .gm.is-collapsed.has-sp .gm__corner { width: max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + .2rem)); }
+  .gm.is-collapsed.has-sp.has-chat .gm__corner { width: max(32px, calc(96px * var(--sp-ui, 1)), calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + 1.51rem + .3rem)); }
 }
 
 /* Short landscape phones (≤ 460 CSS px tall, 1rem = 40 px): the detail card's header is shorter (no romanised name,

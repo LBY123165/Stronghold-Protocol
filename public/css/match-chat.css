@@ -71,64 +71,42 @@
 .mchat-panel__latest { padding: max(.06rem, 4px); flex: none; background: var(--mint-900); border: 0; border-top: 1px solid var(--mint-700); color: var(--mint-400); font-size: max(calc(.12 * var(--t)), 11px); }
 .sp-coarse .mchat-toggle { min-height: 44px; }
 .sp-coarse .mchat-panel__compose textarea { font-size: max(calc(.16 * var(--t)), 16px); }
-/* Preserve the original bottom row. Only the independent chat entry occupies a new row above its emote column. */
+/* The independent entry joins the upstream 0.3.3 corner's own flex row (the AI-participation button, the emote wheel
+   and the gear buttons): it is the row's first item, so it needs no absolute positioning of its own. */
 .gm.has-chat {
   --chat-entry-height: max(.48rem, 32px, calc(34px * var(--sp-ui, 1))); --chat-gear-height: .56rem;
   --chat-corner-top: calc(.34rem + max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) * 55 / 151 + var(--chat-entry-height));
 }
 .sp-coarse .gm.has-chat { --chat-entry-height: max(.48rem, 32px, calc(44px * var(--sp-ui, 1))); }
-.gm.has-chat .gm__corner {
-  display: grid; grid-template-columns: max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) repeat(3, .56rem);
-  grid-template-areas: "chat . . ." "emote gear guide fs"; gap: .1rem; align-items: end; width: auto;
+.gm.has-chat .gm__chat {
+  width: max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))); min-width: 0;
+  align-self: flex-end;
 }
-.gm.has-chat .gm__chat { grid-area: chat; min-width: 0; width: 100%; }
-.gm.has-chat .gm__corner > .ewheel { grid-area: emote; }
-.gm.has-chat .gm__corner > .gm__gear:not(.gm__guide):not(.gm__fs) { grid-area: gear; }
-.gm.has-chat .gm__corner > .gm__guide { grid-area: guide; }
-.gm.has-chat .gm__corner > .gm__fs { grid-area: fs; }
 /* An open original emote panel must leave the independent chat entry clickable. */
 .gm.has-chat .ewheel__panel { bottom: calc(100% + .22rem + var(--chat-entry-height)); }
 .gm.has-chat .team--many { bottom: calc(var(--chat-corner-top) + .16rem); }
 .gm.has-chat .dpanel:not(.dpanel--right) { bottom: calc(var(--chat-corner-top) + .14rem); }
-.gm.has-chat.is-spectator .gm__corner {
-  grid-template-columns: repeat(3, .56rem); grid-template-areas: "chat chat chat" "gear guide fs";
-}
 .mchat-away-entry { position: fixed; z-index: 75; left: max(.24rem, var(--sa-l, 0px)); bottom: max(.24rem, var(--sa-b, 0px)); }
+/* Upstream 0.3.3's exclusive dialogs (the 「协议已失效」 plate, ui/downedPlate.js) live inside the game screen's own
+   stacking context (.screen, z-index 1), so their veil only covers the screen's own elements. The match chat layer is
+   mounted beside the screen (app root, z-index 75), so it would float above that veil and stay clickable through it.
+   Upstream marks the document with `sp-modal-open` while a modal owns the screen (the same hook theme.css uses to
+   hide the rotate hint); the match chat layer yields to it, exactly as the game's own corner controls do. The
+   waiting-room panel (.mchat-panel--lobby) sits inside its own screen and is already below the screen's dialogs. */
+html.sp-modal-open .mchat-away-entry,
+html.sp-modal-open .mchat-panel:not(.mchat-panel--lobby) { display: none; }
 .mchat-brief-entry { margin-right: auto; }
 .mchat-draft-entry { width: 100%; }
 @media (max-height: 600px) and (pointer: coarse), (max-height: 600px) and (any-pointer: coarse) {
   .gm.has-chat { --chat-corner-top: calc(.34rem + max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) * 55 / 151 + 44px); }
   .gm.has-chat { --chat-gear-height: max(.56rem, 32px, calc(34px * var(--sp-ui, 1))); }
-  .gm.has-chat .gm__corner { grid-template-columns: max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) repeat(3, max(.56rem, 32px, calc(34px * var(--sp-ui, 1)))); }
-  .gm.has-chat.is-spectator .gm__corner { grid-template-columns: repeat(3, max(.56rem, 32px, calc(34px * var(--sp-ui, 1)))); }
 }
 @media (max-width: 767px) {
   .gm.has-chat { --chat-corner-top: calc(.44rem + max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) * 55 / 151 + .56rem + max(.48rem, 32px, calc(34px * var(--sp-ui, 1)))); }
-  .gm.has-chat .gm__corner {
-    grid-template-columns: repeat(3, .56rem); grid-template-areas: "chat chat chat" "gear guide fs" "emote emote emote";
-    width: max(calc(72px * var(--sp-ui, 1)), 32px, calc(3 * .56rem + .2rem));
-  }
-  .gm.has-chat .gm__corner > .ewheel { width: max-content; }
   .gm.has-chat .ewheel__panel { bottom: calc(100% + .32rem + var(--chat-entry-height) + var(--chat-gear-height)); }
-  .gm.has-chat.is-spectator .gm__corner { grid-template-areas: "chat chat chat" "gear guide fs"; }
 }
 @media (max-width: 767px) and (pointer: coarse), (max-width: 767px) and (any-pointer: coarse) {
   .gm.has-chat { --chat-corner-top: calc(.44rem + max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) * 55 / 151 + max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + 44px); }
-  .gm.has-chat .gm__corner { grid-template-columns: repeat(3, max(.56rem, 32px, calc(34px * var(--sp-ui, 1)))); width: max(calc(96px * var(--sp-ui, 1)), 32px, calc(3 * max(.56rem, 32px, calc(34px * var(--sp-ui, 1))) + .2rem)); }
-}
-/* Folding the shop restores its original single bottom row on narrow screens. Keeping three rows here would
-   reserve more board height than the open shop, making the folded camera shrink rather than grow. */
-@media (max-width: 767px) {
-  .gm.has-chat.is-collapsed { --chat-corner-top: calc(.34rem + max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) * 55 / 151 + var(--chat-entry-height)); }
-  .gm.has-chat.is-collapsed .gm__corner {
-    grid-template-columns: max(1.51rem, 32px, calc(72px * var(--sp-ui, 1))) repeat(3, .56rem);
-    grid-template-areas: "chat . . ." "emote gear guide fs"; width: auto;
-  }
-  .gm.has-chat.is-collapsed .ewheel__panel { bottom: calc(100% + .22rem + var(--chat-entry-height)); }
-}
-@media (max-width: 767px) and (pointer: coarse), (max-width: 767px) and (any-pointer: coarse) {
-  .gm.has-chat.is-collapsed { --chat-corner-top: calc(.34rem + max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) * 55 / 151 + var(--chat-entry-height)); }
-  .gm.has-chat.is-collapsed .gm__corner { grid-template-columns: max(1.51rem, 32px, calc(96px * var(--sp-ui, 1))) repeat(3, max(.56rem, 32px, calc(34px * var(--sp-ui, 1)))); }
 }
 @media (max-height: 460px) {
   .mchat-panel { width: min(360px, calc(100vw - 24px)); }

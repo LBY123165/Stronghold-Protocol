@@ -451,6 +451,7 @@ export function BandDraftScreen({ held = null } = {}) {
           })}
         </div>
         ${!solo ? html`<p class="draft-order__tip" data-testid="draft-tip">${draftTip({ timed, turnSeconds: turnLen, autoName: myPick ? null : autoName, selected: open && autoId === sel })}</p>` : null}
+        <${MatchChatButton} class="mchat-draft-entry" onBeforeOpen=${() => setInfoOpen(false)} />
       </aside>
       <i class="draft__link" aria-hidden="true"></i>
 

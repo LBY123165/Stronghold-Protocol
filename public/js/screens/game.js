@@ -1916,6 +1916,7 @@ function MatchScreen() {
       <div class="ui-slot gm__ui-slot" data-ui-slot="hud.right" aria-label=${t('界面插件')} dangerouslySetInnerHTML=${{ __html: '' }}></div>
 
       <div class="gm__corner">
+        <${MatchChatButton} class="gm__chat" onBeforeOpen=${() => { setEmoteOpen(false); setDetail(null); setBondOpen(null); setDrawer(null); }} />
         <${AiTakeoverPanel} />
         ${showMetrics && metricsOpen ? html`<${CombatMetricsPanel} myId=${myId} onClose=${() => setMetricsOpen(false)} />` : null}
         ${spectator ? null : html`<${EmoteWheel} open=${emoteOpen} onToggle=${(on) => { if (on) chatActions.setOpen(false); setEmoteOpen(on); }} onSend=${(id) => actions.emote(id)} disabled=${conn.status !== 'online'} />`}

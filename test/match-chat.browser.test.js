@@ -71,10 +71,43 @@ async function closeChat(page) {
 
 async function openChat(page) {
   if (!(await page.$(PANEL))) {
-    await page.waitForSelector(TOGGLE, { visible: true });
+    await page.waitForSelector(TOGGLE, { visible: true }).catch(async (err) => {
+      const dump = await page.evaluate(() => ({
+        phase: globalThis.__SP__.store.get().match?.public?.phase,
+        matchId: globalThis.__SP__.store.get().match?.public ? 'set' : 'none',
+        toggles: [...document.querySelectorAll('[data-match-chat-toggle]')].map((el) => ({
+          cls: el.className, visible: !!(el.offsetWidth || el.offsetHeight),
+          rect: (() => { const r = el.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })(),
+        })),
+        gmChat: !!document.querySelector('.gm__chat'),
+        bodyClass: document.querySelector('.screen')?.className || null,
+      }));
+      throw new Error(`chat entry not reachable: ${JSON.stringify(dump)}`);
+    });
     await page.$eval(TOGGLE, (el) => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
     await page.click(TOGGLE);
-    await page.waitForSelector(INPUT, { visible: true });
+    await page.waitForSelector(INPUT, { visible: true }).catch(async () => {
+      const dump = await page.evaluate(async () => {
+        const chat = await import('/js/matchChat.js');
+        const st = chat.chatStore.get();
+        const el = document.querySelector('[data-match-chat-toggle]');
+        const r = el?.getBoundingClientRect();
+        const at = r ? document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) : null;
+        return {
+          phase: globalThis.__SP__.store.get().match?.public?.phase,
+          open: st.open,
+          toggles: [...document.querySelectorAll('[data-match-chat-toggle]')].map((el) => el.className),
+          panel: !!document.querySelector('[data-testid="match-chat-panel"]'),
+          rect: r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : null,
+          hit: at ? `${at.tagName}.${at.className}` : null,
+          hitIsToggle: !!(at && el && (at === el || el.contains(at))),
+          modal: !!document.querySelector('.modal'),
+          spModalOpen: document.documentElement.classList.contains('sp-modal-open'),
+          coarse: document.documentElement.classList.contains('sp-coarse'),
+        };
+      });
+      throw new Error(`chat panel did not open: ${JSON.stringify(dump)}`);
+    });
   }
 }
 
@@ -142,8 +175,12 @@ test('Edge match-only chat remains separate, readable and usable for players/spe
       page.on('pageerror', (error) => errors.push(`${name}: ${error.message}`));
       await page.setViewport({ width: 1920, height: 1080 });
       await page.goto(server.url, { waitUntil: 'domcontentloaded' });
-      await page.waitForSelector('.title-login input');
-      await page.type('.title-login input', name);
+      await page.waitForSelector('.title-login input[name="username"]');
+      // The title screen wants a name AND a password (8+ characters); these identities are new on this
+      // server, so register each one first (the 登录 button stays disabled until both fields are valid).
+      await page.click('.title-auth-toggle');
+      await page.type('.title-login input[name="username"]', name);
+      await page.type('.title-login input[name="password"]', 'match-chat-test');
       await page.click('.title-login > .btn--primary');
       await page.waitForSelector('.lobby-screen');
       return page;
@@ -323,24 +360,44 @@ test('Edge match-only chat remains separate, readable and usable for players/spe
       }
     }
 
-    // Eliminated and supervised human seats keep an accessible chat entrance.
+    // Eliminated and supervised human seats keep an accessible chat entrance. Upstream v0.3.3 raises its own
+    // exclusive 「协议已失效」 dialog when the player's seat falls while a teammate is still in (ui/downedPlate.js),
+    // and it owns the screen until the player chooses 继续观战 or 离开模拟: the branch's chat layer yields to it
+    // (css/match-chat.css), exactly as the game's own corner controls do. The player dismisses it first.
     await host.setViewport({ width: 844, height: 390, hasTouch: true });
     const hostId = await host.evaluate(() => globalThis.__SP__.store.get().me.playerId);
     const controlled = match.players.get(hostId);
     controlled.alive = false; controlled.autoplay = true; match.show(PHASE.PREP);
     await host.waitForSelector('.mchat-away-entry');
+    await host.waitForSelector('[data-testid="downed-plate"]', { timeout: 5000 });
+    const modalOwns = await host.evaluate(() => {
+      const entry = document.querySelector('.mchat-away-entry');
+      const r = entry.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { blocked: hit !== entry && !entry.contains(hit),
+        hidden: getComputedStyle(entry).display === 'none',
+        spModalOpen: document.documentElement.classList.contains('sp-modal-open') };
+    });
+    assert.equal(modalOwns.spModalOpen, true, "upstream's exclusive dialog marks the document");
+    assert.equal(modalOwns.hidden, true, "the branch's chat entry yields to the upstream dialog");
+    assert.equal(modalOwns.blocked, true, "the upstream veil covers the chat entry's place");
+    // Escape dismisses the upstream dialog, as its own e2e does (test/ui/downed-plate.e2e.test.js). The dialog's
+    // buttons sit under the AI-supervision overlay (upstream's .awayov, app-root layer) in this combined case, so
+    // the keyboard is the documented way out — upstream's own button keeps the keyboard focus.
+    await host.keyboard.press('Escape');
+    await host.waitForFunction(() => !document.querySelector('[data-testid="downed-plate"]'));
+    await host.waitForSelector('.mchat-away-entry', { visible: true });
     await host.click('.mchat-away-entry'); await host.waitForSelector(INPUT);
     tick(); await setDraft(host, '托管淘汰仍可聊天'); await host.click(SEND);
     await waitMessage(guest, '托管淘汰仍可聊天');
     await closeChat(host);
     controlled.alive = true; controlled.autoplay = false; match.show(PHASE.PREP);
     await host.waitForFunction(() => !document.querySelector('.mchat-away-entry'));
-    report.scenes.push({ eliminatedAndAutoplay: true });
+    report.scenes.push({ eliminatedAndAutoplay: true, upstreamDownedDialog: true });
 
     // Same document and identity reconnect retain RAM draft/history, then receive the server snapshot.
     await host.setViewport({ width: 1280, height: 720, hasTouch: true });
-    await openChat(host); await setDraft(host, '重连未发送草稿');
-    const beforeReconnect = await chatState(host);
+    await openChat(host); await setDraft(host, '重连未发送草稿');    const beforeReconnect = await chatState(host);
     const resumed = await host.evaluate(async () => {
       const net = globalThis.__SP__.net, id = net.playerId;
       const welcome = new Promise((resolve) => { const off = net.on('welcome', () => { off(); resolve(); }); });
