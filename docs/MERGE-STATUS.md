@@ -126,15 +126,22 @@
 
 | 门禁 | 结果 |
 |---|---|
-| golden 全量 | **288/288 通过** |
+| golden 全量 | **288/288 通过**（修复后复跑确认） |
 | TypeScript 检查（`tsc --noEmit --checkJs -p jsconfig.json`） | **0 错误** |
+| ESLint（`npx eslint .`） | **0 错误**，321 warnings |
 | 导入守卫（`test/check-imports.test.js`） | 4/4 通过 |
+| 守卫套件（`npm run test:guards`） | 28/28 通过 |
+| 文档一致性（`test/docs-consistency.test.js` + `test/docs-paths.test.js`） | 32/32 通过 |
 | 部署资产（`test/deploy-assets.test.js`） | 11/11 通过 |
 | 公告 CLI（`test/announcements-cli.test.js`） | 4/4 通过 |
 | 网络心跳（`test/net-heartbeat-chunked.test.js`） | 8/8 通过 |
 | 测试房 + i18n（`test/test-mode.test.js` + `test/i18n-server.test.js`） | 47/47 通过 |
 | 分组卡池（`test/match/group-stock.test.js`） | 7/7 通过 |
 | HTTP 运行时（`test/runtime-http.test.js`） | 7/7 通过 |
+| 压缩（`test/ws-compression.test.js`） | 9/9 通过（修复后） |
+| 压测（`test/wire-pressure.test.js`） | 通过（修复后） |
+| 网络五件套（心跳/压缩/压测/HTTP 运行时/紧急保护） | 31/31 通过（修复后） |
+| 共享库存（`test/match/shared-stock.test.js`） | 11/11 通过 |
 
 ---
 
@@ -196,10 +203,12 @@
 
 | 类别 | 数量 | 说明 |
 |---|---|---|
-| 沙箱删除保护（环境噪声） | **24** | `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（`scope: "turn"`，count 50 / threshold 50）—— WorkBuddy 环境的删除保护在单轮内累计到 50 次 `fs.rmSync` 后开始拦截。**逐文件串行跑全部通过**（`test/plugins/forgeImport.test.js` 单独跑 47/47） |
-| 缺失 Python 依赖（环境缺口） | **1** | `test/version-assets.test.js` 需要 `PIL`；Pillow 是项目已声明的依赖（`tools/local-extract/requirements.txt`），但本机 Python 未装。**装上 Pillow 后通过（6/6）** |
-| 上游自身的素材缺陷 | **3** | `test/assets.test.js`：清单里的文件不在磁盘上（`char_109_fmout.atlas`）、atlas 的 `pma` 标记缺失。**已复核上游工作树有完全相同的缺陷**（同样缺 `char_109_fmout`、同样无 `pma`），且 `data/assets.json` 与上游逐字节相同 |
+| 沙箱删除保护（环境噪声） | **24** | `SAFE_DELETE_BULK_CONFIRM_REQUIRED`（`scope: "turn"`，count 50 / threshold 50）—— WorkBuddy 环境的删除保护在单轮内累计到 50 次 `fs.rmSync` 后开始拦截。**逐文件串行跑全部通过**（`test/plugins/forgeImport.test.js` 单独跑 47/47，重复加入同一文件也仍 47/47） |
+| 上游自身的素材缺陷 | **3** | `test/assets.test.js`：**已用同口径证明**——把分支的 `public/assets` 做 Junction 联接给上游工作树，上游跑**自己的** `test/assets.test.js`，失败的是**同样 3 项、同样 3 条报错**（清单里的文件不在磁盘上、atlas 的 `pma` 标记缺失）。缺的是 19 个上游 0.3.3 新增干员的 Spine 模型（需本机客户端提取，公开源没有）；`npm run assets` 已补回 399 个缺失文件中的 98 个，剩余 301 个属正常缺口 |
 | 并发竞态（伪失败） | **2** | `test/official-tables.test.js` 的 studio CLI 用例（并发下 500，串行 17/17 通过）、`test/match/external-transports.test.js` 的 stdio 超时用例（并发下失败，串行连跑 3 次均 16/16 通过） |
+| 缺失 Python 依赖 | **1 → 0** | `test/version-assets.test.js` 需要 `PIL`；Pillow 是项目已声明的依赖（`tools/local-extract/requirements.txt`），本机未装。**装上 Pillow 后通过（6/6）** |
+
+**失败数从 122 降到 27**，且剩余项全部已定性：24 项为沙箱单轮删除预算（逐文件跑即消失）、3 项为上游自身素材缺陷（同口径已证明）。
 
 ### 5.3 并发假说（已证实）
 
@@ -342,9 +351,10 @@ export const WS_DEFLATE = Object.freeze({
 ### 待办
 
 4. ~~**补齐上游 0.3.3 的测试依赖工具链**~~ —— **无需补齐**。上游 `tools/` 目录本来就已随合并引入；原先归为「缺少运行环境」的那批上游新增测试文件（`ai-takeover` / `build` / `ci` / `ci-shards` 等）逐条复跑**全部通过**。见 5.4。
-5. **上游自带的素材缺陷**（`test/assets.test.js` 3 项）—— 已复核上游工作树有完全相同的缺陷（缺 `char_109_fmout.atlas`、smdeer atlas 无 `pma`），且 `data/assets.json` 与上游逐字节相同。**建议向上游反馈**，本分支不局部修（本地素材不全，修了也无法验证）
+5. **上游自带的素材缺陷**（`test/assets.test.js` 3 项）—— **已用同口径证明是上游自身问题**：把分支的 `public/assets` 做 Junction 联接给上游工作树，上游跑**自己的** `test/assets.test.js`，失败的是同样 3 项、同样 3 条报错。缺的是 19 个上游 0.3.3 新增干员的 Spine 模型（需本机客户端提取，公开源没有）。**建议向上游反馈**；本分支不局部修——本地素材不全，修了也无法验证
 6. ~~**`test/match/shared-stock.test.js`**~~ —— **已通过**（11/11），此前记为「与 `rollChess` 修复无关的既有问题」的判断不成立，现随合并一并正常
 7. **本机环境补装 Pillow** —— `tools/local-extract/requirements.txt` 声明了 `Pillow>=10`，本机 Python 未装导致 `test/version-assets.test.js` 失败。已在隔离 venv 与 `python3`（PATH 上的托管解释器）中装好，该用例现通过
+8. **补齐素材** —— `npm run assets` 已跑，补回 399 个缺失文件中的 98 个；剩余 301 个是 19 个新干员的 Spine 模型，需本机客户端提取（`node tools/setup.mjs`），非代码问题
 
 ### 质量门禁待补
 
