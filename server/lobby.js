@@ -2841,8 +2841,10 @@ export class Lobby {
       room.trustedPrevious = state;
     }
     this.discovery.changed();
-    const data = encode(room.toState(this.now()));
-    for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
+    // Encode once for the whole room: the compact (wire v1) form is shared by every v1 recipient (see broadcastRoom).
+    const frame = prepareMessage(room.toState(this.now()));
+    const data = frame.json;
+    for (const session of this.memberSessions(room)) sendRaw(session.ws, data, { compact: frame.compact });
   }
 
   sendState(room, session) {
@@ -2852,11 +2854,16 @@ export class Lobby {
   /** Match broadcast: encode once, send to every connected member. @returns {string | null} the encoded frame */
   broadcastRoom(room, msg, encoded = null) {
     if (room.disposed) return null;
-    const data = encoded ?? encode(msg);
+    // Encode once for the whole broadcast: the compact (wire v1) form is shared by every v1 recipient. Encoding it
+    // per connection instead costs a JSON parse and a wire encoding per socket — with a hundred sockets in one room
+    // that is a hundred times the CPU for the same frame, and the broadcast falls behind its own interval.
+    // `encoded` is a frame a caller already produced (a lane worker's bytes): it is sent as it is.
+    const frame = encoded == null ? prepareMessage(msg) : null;
+    const data = encoded ?? frame.json;
     if (data == null) { this.log.error(`[lobby] ${room.code} unserializable broadcast ${msg && msg.t}`); return null; }
     // per connection: sendSession runs the state transport, which owns each socket's delta baseline (and the
     // droppable/backpressure rules) - one shared byte string in, one frame per member out
-    for (const session of this.memberSessions(room)) sendSession(session, msg, data);
+    for (const session of this.memberSessions(room)) sendSession(session, msg, data, frame);
     return data;
   }
 
@@ -2867,6 +2874,7 @@ export class Lobby {
     if (!seat || seat.isBot || seat.left) return false;
     const session = this.registry.byId(playerId);
     if (!session || session.roomCode !== room.code) return false;
-    return sendSession(session, msg, encoded);
+    const frame = encoded == null ? prepareMessage(msg) : null;
+    return sendSession(session, msg, encoded ?? frame.json, frame);
   }
 }

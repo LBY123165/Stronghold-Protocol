@@ -40,7 +40,7 @@
 //   onDisconnect(session)                  the session's socket closed (session kept for the reconnect window)
 //   onExpire(session)                      the session was purged (disconnected longer than the window)
 
-import { prepareStateFrame, negotiateStateDelta, resetStateDelta, setStateDeltaRoom } from './stateTransport.js';
+import { prepareStateFrame, negotiateStateDelta, resetStateDelta, setStateDeltaRoom, stateDeltaVersion, DELTA_KINDS } from './stateTransport.js';
 import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { C2S, validateC2S } from '../shared/protocol.js';
@@ -332,10 +332,15 @@ export function sendPrepared(ws, frame, opts) {
  * @param {{ droppable?: boolean }} [opts]
  * @returns {boolean} true when the frame was queued
  */
-export function sendRaw(ws, data, { droppable = false } = {}) {
+export function sendRaw(ws, data, { droppable = false, compact = null } = {}) {
   // Stored end-of-match frames and lobby summaries use legacy JSON; replay through the same negotiated boundary.
   if (wireVersionOf(ws) === WIRE_VERSION && typeof data === 'string') {
-    try { data = JSON.stringify(encodeWire(JSON.parse(data), 's2c')); } catch { /* legacy fallback */ }
+    // `compact` is the wire form encoded once for the whole broadcast; without it the frame is re-encoded here,
+    // once per connection — a hundred times the JSON parse and wire encoding for the same frame.
+    if (compact != null) data = compact;
+    else {
+      try { data = JSON.stringify(encodeWire(JSON.parse(data), 's2c')); } catch { /* legacy fallback */ }
+    }
   }
   return queueRaw(ws, data, { droppable });
 }
@@ -366,17 +371,25 @@ export const isDroppable = (msg) => !!msg && msg.t === 'b.snap';
  * @param {string | null} [encoded] bytes a caller already produced; must be this message when it is a state kind
  * @returns {boolean}
  */
-export function send(ws, msg, encoded = null) {
-  const bytes = encoded == null ? encode(msg) : encoded;
-  if (bytes == null) return false;
+export function send(ws, msg, encoded = null, prepared = null) {
   // state kinds go through the delta transport: it owns the per-connection baseline, so commit() only runs after the
   // frame was really queued (a dropped or terminated socket must not advance it).
+  const bytes = encoded ?? prepared?.json ?? encode(msg);
+  if (bytes == null) return false;
   const frame = prepareStateFrame(ws, msg, bytes);
-  // Pre-encoded bytes that are not a JSON object cannot be a baseline: fall back to the full frame encoded here.
-  const data = frame.usable ? frame.data : encode(msg);
-  if (data == null) return false;
-  const ok = sendRaw(ws, data, { droppable: isDroppable(msg) });
-  if (ok && frame.usable) frame.commit();
+  if (!frame.usable) {
+    // Pre-encoded bytes that are not a JSON object cannot be a baseline: fall back to the full frame encoded here.
+    const data = wireVersionOf(ws) === WIRE_VERSION && prepared?.compact ? prepared.compact : encode(msg);
+    if (data == null) return false;
+    return queueRaw(ws, data, { droppable: isDroppable(msg) });
+  }
+  // The delta transport replaces the frame with its own m.state frame (JSON, not the wire form): that one goes out as
+  // it is. Every other frame goes out as the compact form the broadcast encoded once for all its recipients.
+  const delta = stateDeltaVersion(ws) !== undefined && DELTA_KINDS.has(msg?.t);
+  const data = delta ? frame.data
+    : (wireVersionOf(ws) === WIRE_VERSION && prepared?.compact ? prepared.compact : frame.data);
+  const ok = queueRaw(ws, data, { droppable: isDroppable(msg) });
+  if (ok) frame.commit();
   return ok;
 }
 
@@ -386,10 +399,10 @@ export function send(ws, msg, encoded = null) {
  * @param {object} msg
  * @returns {boolean}
  */
-export function sendSession(session, msg, encoded = null) {
+export function sendSession(session, msg, encoded = null, prepared = null) {
   if (!session || !session.connected) return false;
   setStateDeltaRoom(session.ws, session.roomCode ?? null);
-  return send(session.ws, msg, encoded);
+  return send(session.ws, msg, encoded, prepared);
 }
 
 /** @param {unknown} rid */
