@@ -174,7 +174,7 @@ test('an already saturated original match socket is retained without appending m
   } finally { network.close(); }
 });
 
-test('repeated protected heartbeats keep the oldest unanswered ping as recovery evidence', () => {
+test('repeated protected heartbeats keep the oldest unanswered ping as recovery evidence', async () => {
   let now = 1000;
   const registry = new SessionRegistry({ now: () => now });
   const session = registry.create('original');
@@ -185,15 +185,20 @@ test('repeated protected heartbeats keep the oldest unanswered ping as recovery 
   const network = new Network({ registry, now: () => now, log, handler: {
     onMessage() {}, allowEmergencyResume: (s) => s === session, roomOf: () => ({ match: {} }),
   } });
+  // The heartbeat pass yields between chunks, so a pass still running is not started a second time on top of itself
+  // (server/net.js heartbeat). The next heartbeat of the real interval is a later tick: let the pass finish.
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
   try {
     network.handleConnection(socket);
     const conn = network.conns.get(socket);
     conn.session = session; session.ws = socket; session.connected = true;
     network.setEmergency({ active: true, startedAt: now });
     network.heartbeat();
+    await settle();
     now += 30000;
     assert.equal(network.congestion().delayedHeartbeats, 1);
     network.heartbeat();
+    await settle();
     assert.equal(pings, 2);
     assert.equal(terminated, 0);
     assert.equal(conn.pendingPingAt, 1000);
@@ -202,6 +207,7 @@ test('repeated protected heartbeats keep the oldest unanswered ping as recovery 
     assert.equal(network.congestion().delayedHeartbeats, 0);
     assert.equal(conn.pendingPingAt, null);
     network.heartbeat();
+    await settle();
     assert.equal(conn.pendingPingAt, now);
     now += 3001;
     assert.equal(network.congestion().delayedHeartbeats, 1);
