@@ -53,7 +53,11 @@ test('Edge lobby counts, directory join, capacity fallback and no-room feedback 
     page.on('pageerror', (error) => errors.push(error.message));
     await page.setViewport({ width: 1920, height: 1080 });
     await page.goto(server.url, { waitUntil: 'networkidle0' });
-    await page.type('.title-login input', '联机验证博士');
+    // The title screen wants a name AND a password (8+ characters); a fresh server has no such account yet,
+    // so register it first (the 登录 button stays disabled until both fields are valid).
+    await page.click('.title-auth-toggle');
+    await page.type('.title-login input[name="username"]', '联机验证博士');
+    await page.type('.title-login input[name="password"]', 'lobby-discovery-test');
     await page.click('.title-login > .btn--primary');
     await page.waitForFunction((s) => document.querySelector(s)?.textContent === '5', {}, selector('room-count'));
     assert.match(await page.$eval(selector('online'), (el) => el.textContent), /在线 6/);
@@ -63,28 +67,33 @@ test('Edge lobby counts, directory join, capacity fallback and no-room feedback 
     for (const viewport of [{ width: 1920, height: 1080 }, { width: 1280, height: 720 }]) {
       await page.setViewport(viewport);
       await page.mouse.move(viewport.width - 4, 4); // keep lingering tooltips out of the preview
+      // The hub screen animates in (and a dot keeps twinkling); measure once it has settled.
+      await new Promise((r) => setTimeout(r, 600));
       const layout = await page.evaluate(() => {
         const bounds = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
         const panel = document.querySelector('[data-testid="lobby-discovery"]');
-        const body = document.querySelector('.lobby-body');
+        // The hub scrolls in the page itself: upstream rebuilt the lobby body (.lobby-body → .hub-stage).
+        const body = document.documentElement;
         const bodyScroll = body.scrollHeight - body.clientHeight;
-        // Compare the original card spacing without discovery; a small pre-existing right-column scroll
-        // is allowed, but the new panel must not make the screen longer.
+        // Compare the page without the discovery panel; a small pre-existing scroll is allowed, but the new
+        // panel must not make the screen longer.
         const original = document.createElement('style');
-        original.textContent = '.lobby-discovery{display:none!important}.lobby-screen .mode-cards{margin-bottom:.34rem}.lobby-screen .mode-card{min-height:4.3rem;gap:.22rem;padding-top:.34rem;padding-bottom:.3rem}.lobby-screen .mode-card__icon{width:.88rem;height:.88rem}.lobby-screen .mode-card__icon .icon{width:.44rem;height:.44rem}';
+        original.textContent = '.lobby-discovery{display:none!important}';
         document.head.append(original);
         const baselineScroll = body.scrollHeight - body.clientHeight;
         original.remove();
         return { online: bounds(document.querySelector('[data-testid="lobby-online"]')), cache: bounds(document.querySelector('[data-testid="asset-cache-open"]')),
-          heading: bounds(document.querySelector('.topbar__center')), panel: bounds(panel), panelOverflow: panel.scrollWidth > panel.clientWidth + 2,
-          rootPx: parseFloat(getComputedStyle(document.documentElement).fontSize), bodyScroll, baselineScroll,
-          create: bounds(document.querySelector('.create-box .btn--xl')) };
+          topbarLeft: bounds(document.querySelector('.topbar__left')), topbarRight: bounds(document.querySelector('.topbar__right')),
+          entries: bounds(document.querySelector('.hub-entries')),
+          panel: bounds(panel), panelOverflow: panel.scrollWidth > panel.clientWidth + 2,
+          rootPx: parseFloat(getComputedStyle(document.documentElement).fontSize), bodyScroll, baselineScroll };
       });
-      assert.ok(layout.online.right <= layout.cache.left + 1 && layout.cache.right < layout.heading.left, 'left controls never overlap cache or heading');
+      assert.ok(layout.online.right <= layout.cache.left + 1 && layout.topbarLeft.right <= layout.topbarRight.left,
+        'left controls never overlap the cache button or the right group');
       assert.ok(layout.panel.height <= layout.rootPx * 1.5, 'discovery stays a compact two-row panel');
       assert.equal(layout.panelOverflow, false);
       report.layouts.push({ screen: 'lobby', ...viewport, ...layout });
-      assert.ok(layout.create.bottom <= viewport.height, `create button fits; extra scroll ${layout.bodyScroll}px`);
+      assert.ok(layout.entries.bottom <= viewport.height, `the mode entries fit; extra scroll ${layout.bodyScroll}px`);
       assert.ok(layout.bodyScroll <= layout.baselineScroll + 2, 'new discovery preserves the original page scroll range');
       await page.screenshot({ path: path.join(OUT, `lobby-${viewport.width}.png`) });
       await page.click(selector('directory-open'));

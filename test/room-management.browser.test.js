@@ -86,7 +86,11 @@ test('Edge retained directory, P1 host handover and live owner AI limits remain 
       page.on('pageerror', (error) => errors.push(`${name}: ${error.message}`));
       await page.setViewport({ width: 1920, height: 1080 });
       await page.goto(server.url, { waitUntil: 'networkidle0' });
-      await page.type('.title-login input', name);
+      // The title screen wants a name AND a password (8+ characters); these identities are new on this
+      // server, so register each one first (the 登录 button stays disabled until both fields are valid).
+      await page.click('.title-auth-toggle');
+      await page.type('.title-login input[name="username"]', name);
+      await page.type('.title-login input[name="password"]', 'room-management-test');
       await page.click('.title-login > .btn--primary');
       await page.waitForSelector('.lobby-screen');
       return page;
