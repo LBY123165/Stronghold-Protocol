@@ -105,7 +105,10 @@ export function ChessCard({ slot, idx, priv, frozen = false, reason = null, free
       aria-label=${`${t('{name}，价格 {price}', { name, price: slot.price })}${armed ? (disabled ? t('，无法购买') : t('，再次点击确认')) : ''}`} aria-pressed=${onTap ? String(!!armed) : undefined}>
     <span class="scard__bg" aria-hidden="true"></span>
     <span class="scard__water" aria-hidden="true">${bonds[0] ? html`<${BondGlyph} bondId=${bonds[0]} />` : null}</span>
-    <${OperatorImage} m=${m} chess=${c} portrait ownerId=${priv?.playerId} class="scard__art" />
+    // the shop card keeps the operator's own portrait (ownerId null = no skin): the 0.2.4 skin pack ships square
+    // avatars only, stretched over the card's tall strip they read wrong — the skin still shows on the board's model
+    // (branch decision 2026-10-28, the maintainer's 「商店还是用原皮的」)
+    <${OperatorImage} m=${m} chess=${c} portrait ownerId=${null} class="scard__art" />
     <span class="scard__top">
       <${TierChip} tier=${tier} size="md" />
       <${PriceHex} slot=${slot} free=${free} poor=${reason === t('资金不足')} />

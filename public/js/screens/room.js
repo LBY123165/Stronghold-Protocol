@@ -71,9 +71,7 @@ import { net } from '../net.js';
 import { store, useStore, shallowEqual, emptyMatch, isSpectating, savePref } from '../store.js';
 import { data, useData, getConfig } from '../data.js';
 import { chessAvatarUrl, chessPortraitUrl } from '../ui/assetUrls.js';
-import { CARD_KEY, cardStore, setCard, cardOperators, cardContext, seatOperator, seatCardSkin, seatArtSrc } from '../ui/seatArt.js';
-import { skinsStore, SKINS_KEY, ownerSkin } from '../ui/skins.js';
-import { settingsStore } from '../ui/settingsStore.js';
+import { CARD_KEY, cardStore, setCard, cardOperators, cardContext, seatOperator, seatArtSrc } from '../ui/seatArt.js';import { skinsStore, SKINS_KEY, ownerSkin } from '../ui/skins.js';
 import { difficultyInfo, ProtocolSelect } from './lobby.js';
 import { useRise } from '../ui/transitions.js';
 import { t, tc } from '../../../shared/i18n.js';
@@ -538,7 +536,6 @@ export function RoomScreen() {
   const cards = useMemo(() => cardContext(cardList), [cardList]);
   const myCard = useStore((s) => s[CARD_KEY], Object.is, cardStore);
   const localSkins = useStore((s) => s[SKINS_KEY], Object.is, skinsStore);
-  const otherSkins = useStore((s) => s.otherSkins !== false, Object.is, settingsStore);
   const [picking, setPicking] = useState(false);
   // the room whose seats are on screen: a seat card that mounts after its first render is new (an AI teammate added)
   const shownRoom = useRef('');
@@ -793,12 +790,11 @@ export function RoomScreen() {
     <main class=${`seats rs-seats${coop ? '' : ' seats--solo'}${coop && facts.seats.length > 4 ? ' rs-seats--grid' : ''}`}>
       ${facts.seats.map((s, i) => {
         const op = seatOperator(s, cards, { myId: me.playerId, myCard });
-        // the player's outfit for that operator (header "Outfits"); null = the default art
-        const skin = op ? seatCardSkin(s, op.chess.charId, { myId: me.playerId, localSkins, players: facts.occupied, otherSkins }) : null;
+        // 名片干员固定画默认立绘（分支决定 2026-10-28）：皮肤只有 avatar 方图，裁进卡片里观感差，
+        // 且多人局卡片比例随人数变化。皮肤只在干员调配的皮肤选择器与对局模型里生效。
         return html`<${SeatCard} key=${s ? `p${s.playerId}` : `e${i}`} seat=${s} index=${i} room=${room} facts=${facts}
           myId=${me.playerId} busy=${busy} onAddBot=${addBot} onRemoveBot=${removeBot} onKick=${kick} onTransferHost=${transferHost} onInvite=${() => copy('code')}
-          portrait=${op ? chessPortraitUrl(data.get('assets'), op.chess, { skin }) : null}
-          portraitDefault=${op && skin ? chessPortraitUrl(data.get('assets'), op.chess) : null} operator=${op?.chess} onPickCard=${() => setPicking(true)}
+          portrait=${op ? chessPortraitUrl(data.get('assets'), op.chess) : null} operator=${op?.chess} onPickCard=${() => setPicking(true)}
           fresh=${shownRoom.current === room.code} />`;
       })}
       ${coop ? null : html`<aside class="solo-brief rs-brief brackets">
