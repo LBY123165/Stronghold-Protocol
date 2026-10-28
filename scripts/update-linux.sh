@@ -5,10 +5,14 @@
 # 注意：`npm ci --omit=dev` 会把 devDependencies（eslint/typescript/puppeteer）清掉，这正是服务器上想要的。
 #      想在服务器上跑 `node --test` 的话，改成本脚本末尾提示的 `npm ci`（带 dev）。
 # 用法：cd /opt/stronghold && sudo ./scripts/update-linux.sh
+# REMOTE 指定拉取的 git 远端名（默认 origin）。origin 必须指向你自己维护的仓库：
+# 服务器是当初从别人的库 clone 的話，先改指向（一次性）：
+#   git remote set-url origin https://github.com/<你>/<仓库名>.git
 set -eu
 
 APP_DIR=${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
 SERVICE=${SERVICE:-stronghold}
+REMOTE=${REMOTE:-origin}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-30}
 
 say() { printf '%s\n' "$*"; }
@@ -23,9 +27,12 @@ say "更新目录        : $APP_DIR"
 # ---- 1. 代码 -----------------------------------------------------------------------------------
 if [ -d .git ]; then
   BRANCH=$(git rev-parse --abbrev-ref HEAD)
-  say "git             : $BRANCH，拉到最新（--ff-only，绝不覆盖本地改动）"
-  git fetch --prune
-  git merge --ff-only "origin/$BRANCH" || fail "快进合并失败：本地有改动或历史分叉，请先手动处理"
+  say "git             : $BRANCH，从 $REMOTE 拉到最新（--ff-only，绝不覆盖本地改动）"
+  git fetch --prune "$REMOTE"
+  if ! git rev-parse --verify --quiet "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+    fail "$REMOTE 上没有分支 $BRANCH。常见原因：origin 还指向别人的仓库（先 git remote set-url origin <你的仓库>），或这个分支还没推上去（git push $REMOTE $BRANCH）"
+  fi
+  git merge --ff-only "$REMOTE/$BRANCH" || fail "快进合并失败：本地有改动或历史分叉，请先手动处理"
   say "当前提交        : $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 else
   say "git             : 不是 git 仓库，跳过（你自己用 rsync/scp 同步代码）"

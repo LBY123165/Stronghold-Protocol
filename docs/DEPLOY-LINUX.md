@@ -287,7 +287,9 @@ sudo sh scripts/update-linux.sh     # git 快进 + npm ci --omit=dev + vendor + 
 
 脚本做的事与注意事项：
 
-- `git merge --ff-only`：**本地有改动就拒绝**，不会覆盖你的修改。
+- 拉取的远端默认是 `origin`，**它必须指向你自己维护的仓库**。服务器是当初从别人的库 clone 的话，先改指向（一次性，之后脚本不用再管）：
+  `git remote set-url origin https://github.com/<你>/<仓库名>.git`；也可临时用别的远端名：`sudo REMOTE=myfork sh scripts/update-linux.sh`。
+- `git merge --ff-only`：**本地有改动就拒绝**，不会覆盖你的修改；远端上没有当前分支时会明确报错（提示改 remote 或先推送）。
 - `npm ci --omit=dev` 会**删掉 devDependencies**（eslint/typescript/puppeteer）。想在服务器上跑 `node --test` 就改跑 `npm ci`。
 - `runtime/` 不受影响（公告与设置保留）。
 - 探活失败会以非零退出并提示看 `journalctl`。
