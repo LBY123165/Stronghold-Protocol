@@ -54,20 +54,36 @@ test('member controls render transfer beside kick, preserve confirmed identities
   const calls = [];
   const props = { seat: guest, index: 1, room: source, facts: roomFacts(source, 'host'), myId: 'host', busy: null,
     onTransferHost: (...args) => calls.push(args), onKick: (...args) => calls.push(args) };
-  const buttons = [...walk(seatCardView(props))].filter((n) => n.type === Button);
-  assert.deepEqual(buttons.map((n) => n.props.icon), ['crown', 'close']);
+  // the host's 移出 is the upstream corner badge (a plain `.rseat__kick` button — the form the v0.3.3 merge brought
+  // back), not a Button component; the branch's 转让房主 stays a Button in the seat foot
+  const kickOf = (view) => [...walk(view)].find((n) => n.props?.class === 'rseat__kick');
+  const view = seatCardView(props);
+  const buttons = [...walk(view)].filter((n) => n.type === Button);
+  assert.deepEqual(buttons.map((n) => n.props.icon), ['crown']);
   assert.equal(buttons[0].props['aria-label'], '转让房主给该博士');
   buttons[0].props.onClick();
-  buttons[1].props.onClick();
+  const kick = kickOf(view);
+  assert.equal(kick.props.title, '将该博士移出同盟');
+  kick.props.onClick();
   assert.deepEqual(calls, [[1, 'Guest', 'guest'], [1, 'Guest', 'guest']]);
-  assert.ok([...walk(seatCardView({ ...props, busy: 'transfer1' }))].filter((n) => n.type === Button).every((n) => n.props.disabled));
+  // upstream behaviour: a busy lock disables only its own action — the transfer spinner leaves the 移出 badge live,
+  // and a pending kick disables the badge but not the transfer button
+  const busyView = seatCardView({ ...props, busy: 'transfer1' });
+  assert.ok([...walk(busyView)].filter((n) => n.type === Button).every((n) => n.props.disabled));
+  assert.equal(kickOf(busyView).props.disabled, false);
+  assert.equal(kickOf(seatCardView({ ...props, busy: 'kick1' })).props.disabled, true);
   const botCard = seatCardView({ ...props, seat: bot, index: 2, onRemoveBot: (...args) => calls.push(args) });
-  const botButtons = [...walk(botCard)].filter((n) => n.type === Button);
-  assert.equal(botButtons.length, 1);
-  botButtons[0].props.onClick();
-  assert.deepEqual(calls.at(-1), [2, 'bot']);
-  assert.equal([...walk(seatCardView({ ...props, seat: { ...guest, connected: false } }))].filter((n) => n.type === Button).length, 1);
-  assert.equal([...walk(seatCardView({ ...props, myId: 'guest', facts: roomFacts(source, 'guest') }))].filter((n) => n.type === Button).length, 0);
+  const botKick = kickOf(botCard);
+  assert.ok(botKick);
+  assert.equal([...walk(botCard)].filter((n) => n.type === Button).length, 0);
+  botKick.props.onClick();
+  // upstream's 移除 AI 队友 passes the seat alone (the action resolves the player server-side)
+  assert.deepEqual(calls.at(-1), [2]);
+  // an offline doctor keeps the 移出 badge (upstream draws no online gate on it); a non-host sees no member controls
+  assert.ok(kickOf(seatCardView({ ...props, seat: { ...guest, connected: false } })));
+  const guestView = seatCardView({ ...props, myId: 'guest', facts: roomFacts(source, 'guest') });
+  assert.equal([...walk(guestView)].filter((n) => n.type === Button).length, 0);
+  assert.equal(kickOf(guestView), undefined);
 });
 
 test('empty seats explain server AI limit and block repeated or conflicting additions', () => {

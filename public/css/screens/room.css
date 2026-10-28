@@ -648,6 +648,14 @@
   box-shadow: 0 .1rem .4rem rgba(0, 0, 0, .7);
 }
 .rs-opts h4 { margin: 0; font-size: calc(.2 * var(--t)); }
+/* (branch, the D035 pattern — match-chat.css) While a modal owns the screen (`html.sp-modal-open`, the hook
+   components.js sets), the settings dialog must cover the room: the modal is mounted inside `.rs-top`, whose
+   stacking context (z-index 3) ties with the seats' positioned children — `.rseat__kick`, the host's 移出 badge,
+   also z-index 3 and later in the DOM — so the badge painted above the modal's veil. Upstream 0.3.3 has the same
+   tie (its four-seat room just never showed it). Lift the top bar over the seats while a modal is up, and drop the
+   同盟设置 popup (`.rs-opts`, z-index 10, would win the same tie against the veil) under it. */
+html.sp-modal-open .rs .rs-top { z-index: 4; }
+html.sp-modal-open .rs .rs-opts { z-index: 2; }
 /* 同盟设置's 模拟难度 row: the difficulty (the host's 更改 opens 选择模拟协议; the others read it) */
 .rs-opts__row { display: flex; align-items: center; gap: .12rem; font-size: calc(.14 * var(--t)); }
 .rs-opts__k { color: var(--text-lo); }
